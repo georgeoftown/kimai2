@@ -9,7 +9,7 @@
 
 namespace App\Configuration;
 
-class ThemeConfiguration implements SystemBundleConfiguration
+class ThemeConfiguration implements SystemBundleConfiguration, \ArrayAccess
 {
     use StringAccessibleConfigTrait;
 
@@ -18,8 +18,27 @@ class ThemeConfiguration implements SystemBundleConfiguration
         return 'theme';
     }
 
+    public function isAutoReloadDatatable(): bool
+    {
+        return (bool) $this->find('auto_reload_datatable');
+    }
+
+    /**
+     * Currently unused, as JS selects are always activated.
+     * @deprecated since 1.7 will be removed with 2.0
+     */
     public function getSelectPicker(): string
     {
         return (string) $this->find('select_type');
+    }
+
+    public function getTitle(): ?string
+    {
+        $title = $this->find('branding.title');
+        if (null === $title) {
+            return null;
+        }
+
+        return (string) $title;
     }
 }

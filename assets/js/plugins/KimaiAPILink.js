@@ -5,7 +5,7 @@
  * file that was distributed with this source code.
  */
 
-import KimaiClickHandlerReducedInTableRow from "./KimaiClickHandlerReducedInTableRow";
+import KimaiPlugin from "../KimaiPlugin";
 
 /**
  * Needs to be initialized with a class name.
@@ -18,7 +18,7 @@ import KimaiClickHandlerReducedInTableRow from "./KimaiClickHandlerReducedInTabl
  *
  * @param selector
  */
-export default class KimaiAPILink extends KimaiClickHandlerReducedInTableRow {
+export default class KimaiAPILink extends KimaiPlugin {
 
     constructor(selector) {
         super();
@@ -29,7 +29,7 @@ export default class KimaiAPILink extends KimaiClickHandlerReducedInTableRow {
         const self = this;
         document.addEventListener('click', function(event) {
             let target = event.target;
-            while (!target.matches('body')) {
+            while (target !== null && !target.matches('body')) {
                 if (target.classList.contains(self.selector)) {
                     const attributes = target.dataset;
 
@@ -39,8 +39,10 @@ export default class KimaiAPILink extends KimaiClickHandlerReducedInTableRow {
                     }
 
                     if (attributes.question !== undefined) {
-                        self.getContainer().getPlugin('alert').question(attributes.question, function() {
-                            self._callApi(url, attributes);
+                        self.getContainer().getPlugin('alert').question(attributes.question, function(value) {
+                            if (value) {
+                                self._callApi(url, attributes);
+                            }
                         });
                     } else {
                         self._callApi(url, attributes);

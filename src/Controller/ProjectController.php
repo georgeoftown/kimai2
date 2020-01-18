@@ -9,68 +9,130 @@
 
 namespace App\Controller;
 
+use App\Configuration\FormConfiguration;
 use App\Entity\Customer;
+use App\Entity\MetaTableTypeInterface;
 use App\Entity\Project;
+use App\Entity\ProjectComment;
+use App\Entity\Team;
+use App\Event\ProjectMetaDefinitionEvent;
+use App\Event\ProjectMetaDisplayEvent;
+use App\Form\ProjectCommentForm;
 use App\Form\ProjectEditForm;
+use App\Form\ProjectTeamPermissionForm;
 use App\Form\Toolbar\ProjectToolbarForm;
 use App\Form\Type\ProjectType;
+use App\Repository\ActivityRepository;
 use App\Repository\ProjectRepository;
+use App\Repository\Query\ActivityQuery;
+use App\Repository\Query\ProjectFormTypeQuery;
 use App\Repository\Query\ProjectQuery;
-use Doctrine\ORM\ORMException;
+use App\Repository\TeamRepository;
 use Pagerfanta\Pagerfanta;
 use Sensio\Bundle\FrameworkExtraBundle\Configuration\Security;
+use Symfony\Component\EventDispatcher\EventDispatcherInterface;
+use Symfony\Component\Form\FormInterface;
+use Symfony\Component\HttpFoundation\RedirectResponse;
 use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Annotation\Route;
 
 /**
- * Controller used to manage projects in the admin part of the site.
+ * Controller used to manage projects.
  *
  * @Route(path="/admin/project")
- * @Security("is_granted('view_project')")
+ * @Security("is_granted('view_project') or is_granted('view_teamlead_project') or is_granted('view_team_project')")
  */
-class ProjectController extends AbstractController
+final class ProjectController extends AbstractController
 {
     /**
-     * @return \App\Repository\ProjectRepository
+     * @var ProjectRepository
      */
-    protected function getRepository()
+    private $repository;
+    /**
+     * @var FormConfiguration
+     */
+    private $configuration;
+    /**
+     * @var EventDispatcherInterface
+     */
+    private $dispatcher;
+
+    public function __construct(ProjectRepository $repository, FormConfiguration $configuration, EventDispatcherInterface $dispatcher)
     {
-        return $this->getDoctrine()->getRepository(Project::class);
+        $this->repository = $repository;
+        $this->configuration = $configuration;
+        $this->dispatcher = $dispatcher;
     }
 
     /**
      * @Route(path="/", defaults={"page": 1}, name="admin_project", methods={"GET"})
      * @Route(path="/page/{page}", requirements={"page": "[1-9]\d*"}, name="admin_project_paginated", methods={"GET"})
-     * @Security("is_granted('view_project')")
-     *
-     * @param int $page
-     * @param Request $request
-     * @return \Symfony\Component\HttpFoundation\Response
      */
     public function indexAction($page, Request $request)
     {
         $query = new ProjectQuery();
-        $query
-            ->setOrderBy('name')
-            ->setExclusiveVisibility(true)
-            ->setPage($page)
-        ;
+        $query->setCurrentUser($this->getUser());
+        $query->setPage($page);
 
         $form = $this->getToolbarForm($query);
-        $form->handleRequest($request);
-        if ($form->isSubmitted() && $form->isValid()) {
-            /** @var ProjectQuery $query */
-            $query = $form->getData();
+        $form->setData($query);
+        $form->submit($request->query->all(), false);
+
+        if (!$form->isValid()) {
+            $query->resetByFormError($form->getErrors());
         }
 
         /* @var $entries Pagerfanta */
-        $entries = $this->getDoctrine()->getRepository(Project::class)->findByQuery($query);
+        $entries = $this->repository->getPagerfantaForQuery($query);
 
         return $this->render('project/index.html.twig', [
             'entries' => $entries,
             'query' => $query,
-            'showFilter' => $form->isSubmitted(),
             'toolbarForm' => $form->createView(),
+            'metaColumns' => $this->findMetaColumns($query),
+        ]);
+    }
+
+    /**
+     * @param ProjectQuery $query
+     * @return MetaTableTypeInterface[]
+     */
+    protected function findMetaColumns(ProjectQuery $query): array
+    {
+        $event = new ProjectMetaDisplayEvent($query, ProjectMetaDisplayEvent::PROJECT);
+        $this->dispatcher->dispatch($event);
+
+        return $event->getFields();
+    }
+
+    /**
+     * @Route(path="/{id}/permissions", name="admin_project_permissions", methods={"GET", "POST"})
+     * @Security("is_granted('permissions', project)")
+     */
+    public function teamPermissions(Project $project, Request $request)
+    {
+        $form = $this->createForm(ProjectTeamPermissionForm::class, $project, [
+            'action' => $this->generateUrl('admin_project_permissions', ['id' => $project->getId()]),
+            'method' => 'POST',
+        ]);
+
+        $form->handleRequest($request);
+
+        if ($form->isSubmitted() && $form->isValid()) {
+            try {
+                $this->repository->saveProject($project);
+                $this->flashSuccess('action.update.success');
+
+                return $this->redirectToRoute('admin_project');
+            } catch (\Exception $ex) {
+                $this->flashError('action.update.error', ['%reason%' => $ex->getMessage()]);
+            }
+        }
+
+        return $this->render('project/permissions.html.twig', [
+            'project' => $project,
+            'form' => $form->createView()
         ]);
     }
 
@@ -78,10 +140,6 @@ class ProjectController extends AbstractController
      * @Route(path="/create", name="admin_project_create", methods={"GET", "POST"})
      * @Route(path="/create/{customer}", name="admin_project_create_with_customer", methods={"GET", "POST"})
      * @Security("is_granted('create_project')")
-     *
-     * @param Request $request
-     * @param Customer|null $customer
-     * @return \Symfony\Component\HttpFoundation\RedirectResponse|\Symfony\Component\HttpFoundation\Response
      */
     public function createAction(Request $request, ?Customer $customer = null)
     {
@@ -95,12 +153,160 @@ class ProjectController extends AbstractController
     }
 
     /**
+     * @Route(path="/{id}/comment_delete", name="project_comment_delete", methods={"GET"})
+     * @Security("is_granted('edit', comment.getProject()) and is_granted('comments', comment.getProject())")
+     */
+    public function deleteCommentAction(ProjectComment $comment)
+    {
+        $projectId = $comment->getProject()->getId();
+
+        try {
+            $this->repository->deleteComment($comment);
+        } catch (\Exception $ex) {
+            $this->flashError('action.delete.error', ['%reason%' => $ex->getMessage()]);
+        }
+
+        return $this->redirectToRoute('project_details', ['id' => $projectId]);
+    }
+
+    /**
+     * @Route(path="/{id}/comment_add", name="project_comment_add", methods={"POST"})
+     * @Security("is_granted('edit', project) and is_granted('comments', project)")
+     */
+    public function addCommentAction(Project $project, Request $request)
+    {
+        $comment = new ProjectComment();
+        $form = $this->getCommentForm($project, $comment);
+
+        $form->handleRequest($request);
+
+        if ($form->isSubmitted() && $form->isValid()) {
+            try {
+                $this->repository->saveComment($comment);
+            } catch (\Exception $ex) {
+                $this->flashError('action.update.error', ['%reason%' => $ex->getMessage()]);
+            }
+        }
+
+        return $this->redirectToRoute('project_details', ['id' => $project->getId()]);
+    }
+
+    /**
+     * @Route(path="/{id}/comment_pin", name="project_comment_pin", methods={"GET"})
+     * @Security("is_granted('edit', comment.getProject()) and is_granted('comments', comment.getProject())")
+     */
+    public function pinCommentAction(ProjectComment $comment)
+    {
+        $comment->setPinned(!$comment->isPinned());
+        try {
+            $this->repository->saveComment($comment);
+        } catch (\Exception $ex) {
+            $this->flashError('action.update.error', ['%reason%' => $ex->getMessage()]);
+        }
+
+        return $this->redirectToRoute('project_details', ['id' => $comment->getProject()->getId()]);
+    }
+
+    /**
+     * @Route(path="/{id}/create_team", name="project_team_create", methods={"GET"})
+     * @Security("is_granted('create_team') and is_granted('edit', project)")
+     */
+    public function createDefaultTeamAction(Project $project, TeamRepository $teamRepository)
+    {
+        $defaultTeam = $teamRepository->findOneBy(['name' => $project->getName()]);
+        if (null !== $defaultTeam) {
+            $this->flashError('action.update.error', ['%reason%' => 'Team already existing']);
+
+            return $this->redirectToRoute('project_details', ['id' => $project->getId()]);
+        }
+
+        $defaultTeam = new Team();
+        $defaultTeam->setName($project->getName());
+        $defaultTeam->setTeamLead($this->getUser());
+        $defaultTeam->addProject($project);
+
+        try {
+            $teamRepository->saveTeam($defaultTeam);
+        } catch (\Exception $ex) {
+            $this->flashError('action.update.error', ['%reason%' => $ex->getMessage()]);
+        }
+
+        return $this->redirectToRoute('project_details', ['id' => $project->getId()]);
+    }
+
+    /**
+     * @Route(path="/{id}/activities/{page}", defaults={"page": 1}, name="project_activities", methods={"GET", "POST"})
+     * @Security("is_granted('view', project)")
+     */
+    public function activitiesAction(Project $project, int $page, ActivityRepository $activityRepository)
+    {
+        $query = new ActivityQuery();
+        $query->setCurrentUser($this->getUser());
+        $query->setPage($page);
+        $query->setPageSize(5);
+        $query->setProject($project);
+        $query->setExcludeGlobals(true);
+
+        /* @var $entries Pagerfanta */
+        $entries = $activityRepository->getPagerfantaForQuery($query);
+
+        return $this->render('project/embed_activities.html.twig', [
+            'project' => $project,
+            'activities' => $entries,
+            'page' => $page,
+        ]);
+    }
+
+    /**
+     * @Route(path="/{id}/details", name="project_details", methods={"GET", "POST"})
+     * @Security("is_granted('view', project)")
+     */
+    public function detailsAction(Project $project, TeamRepository $teamRepository)
+    {
+        $event = new ProjectMetaDefinitionEvent($project);
+        $this->dispatcher->dispatch($event);
+
+        $stats = null;
+        $defaultTeam = null;
+        $commentForm = null;
+        $attachments = [];
+        $comments = null;
+        $teams = null;
+
+        if ($this->isGranted('edit', $project)) {
+            $commentForm = $this->getCommentForm($project, new ProjectComment())->createView();
+
+            if ($this->isGranted('create_team')) {
+                $defaultTeam = $teamRepository->findOneBy(['name' => $project->getName()]);
+            }
+        }
+
+        if ($this->isGranted('budget', $project)) {
+            $stats = $this->repository->getProjectStatistics($project);
+        }
+
+        if ($this->isGranted('comments', $project)) {
+            $comments = $this->repository->getComments($project);
+        }
+
+        if ($this->isGranted('permissions', $project) || $this->isGranted('details', $project) || $this->isGranted('view_team')) {
+            $teams = $project->getTeams();
+        }
+
+        return $this->render('project/details.html.twig', [
+            'project' => $project,
+            'comments' => $comments,
+            'commentForm' => $commentForm,
+            'attachments' => $attachments,
+            'stats' => $stats,
+            'team' => $defaultTeam,
+            'teams' => $teams,
+        ]);
+    }
+
+    /**
      * @Route(path="/{id}/edit", name="admin_project_edit", methods={"GET", "POST"})
      * @Security("is_granted('edit', project)")
-     *
-     * @param Project $project
-     * @param Request $request
-     * @return \Symfony\Component\HttpFoundation\RedirectResponse|\Symfony\Component\HttpFoundation\Response
      */
     public function editAction(Project $project, Request $request)
     {
@@ -110,14 +316,10 @@ class ProjectController extends AbstractController
     /**
      * @Route(path="/{id}/delete", name="admin_project_delete", methods={"GET", "POST"})
      * @Security("is_granted('delete', project)")
-     *
-     * @param Project $project
-     * @param Request $request
-     * @return \Symfony\Component\HttpFoundation\RedirectResponse|\Symfony\Component\HttpFoundation\Response
      */
     public function deleteAction(Project $project, Request $request)
     {
-        $stats = $this->getRepository()->getProjectStatistics($project);
+        $stats = $this->repository->getProjectStatistics($project);
 
         $deleteForm = $this->createFormBuilder(null, [
                 'attr' => [
@@ -129,13 +331,12 @@ class ProjectController extends AbstractController
             ->add('project', ProjectType::class, [
                 'label' => 'label.project',
                 'query_builder' => function (ProjectRepository $repo) use ($project) {
-                    $query = new ProjectQuery();
-                    $query
-                        ->setResultType(ProjectQuery::RESULT_TYPE_QUERYBUILDER)
-                        ->setCustomer($project->getCustomer())
-                        ->addIgnoredEntity($project);
+                    $query = new ProjectFormTypeQuery();
+                    $query->setCustomer($project->getCustomer());
+                    $query->setProjectToIgnore($project);
+                    $query->setUser($this->getUser());
 
-                    return $repo->findByQuery($query);
+                    return $repo->getQueryBuilderForFormType($query);
                 },
                 'required' => false,
             ])
@@ -147,9 +348,9 @@ class ProjectController extends AbstractController
 
         if ($deleteForm->isSubmitted() && $deleteForm->isValid()) {
             try {
-                $this->getRepository()->deleteProject($project, $deleteForm->get('project')->getData());
+                $this->repository->deleteProject($project, $deleteForm->get('project')->getData());
                 $this->flashSuccess('action.delete.success');
-            } catch (ORMException $ex) {
+            } catch (\Exception $ex) {
                 $this->flashError('action.delete.error', ['%reason%' => $ex->getMessage()]);
             }
 
@@ -166,29 +367,29 @@ class ProjectController extends AbstractController
     /**
      * @param Project $project
      * @param Request $request
-     * @return \Symfony\Component\HttpFoundation\RedirectResponse|\Symfony\Component\HttpFoundation\Response
+     * @return RedirectResponse|Response
      */
-    protected function renderProjectForm(Project $project, Request $request)
+    private function renderProjectForm(Project $project, Request $request)
     {
         $editForm = $this->createEditForm($project);
-
         $editForm->handleRequest($request);
 
         if ($editForm->isSubmitted() && $editForm->isValid()) {
-            $entityManager = $this->getDoctrine()->getManager();
-            $entityManager->persist($project);
-            $entityManager->flush();
+            try {
+                $this->repository->saveProject($project);
+                $this->flashSuccess('action.update.success');
 
-            $this->flashSuccess('action.update.success');
-
-            if ($editForm->has('create_more') && $editForm->get('create_more')->getData() === true) {
-                $newProject = new Project();
-                $newProject->setCustomer($project->getCustomer());
-                $editForm = $this->createEditForm($newProject);
-                $editForm->get('create_more')->setData(true);
-                $project = $newProject;
-            } else {
-                return $this->redirectToRoute('admin_project');
+                if ($editForm->has('create_more') && $editForm->get('create_more')->getData() === true) {
+                    $newProject = new Project();
+                    $newProject->setCustomer($project->getCustomer());
+                    $editForm = $this->createEditForm($newProject);
+                    $editForm->get('create_more')->setData(true);
+                    $project = $newProject;
+                } else {
+                    return $this->redirectToRoute('project_details', ['id' => $project->getId()]);
+                }
+            } catch (\Exception $ex) {
+                $this->flashError('action.update.error', ['%reason%' => $ex->getMessage()]);
             }
         }
 
@@ -198,11 +399,7 @@ class ProjectController extends AbstractController
         ]);
     }
 
-    /**
-     * @param ProjectQuery $query
-     * @return \Symfony\Component\Form\FormInterface
-     */
-    protected function getToolbarForm(ProjectQuery $query)
+    protected function getToolbarForm(ProjectQuery $query): FormInterface
     {
         return $this->createForm(ProjectToolbarForm::class, $query, [
             'action' => $this->generateUrl('admin_project', [
@@ -212,16 +409,28 @@ class ProjectController extends AbstractController
         ]);
     }
 
-    /**
-     * @param Project $project
-     * @return \Symfony\Component\Form\FormInterface
-     */
-    private function createEditForm(Project $project)
+    private function getCommentForm(Project $project, ProjectComment $comment): FormInterface
     {
-        if ($project->getId() === null) {
-            $url = $this->generateUrl('admin_project_create');
-            $currency = Customer::DEFAULT_CURRENCY;
-        } else {
+        if (null === $comment->getId()) {
+            $comment->setProject($project);
+            $comment->setCreatedBy($this->getUser());
+        }
+
+        return $this->createForm(ProjectCommentForm::class, $comment, [
+            'action' => $this->generateUrl('project_comment_add', ['id' => $project->getId()]),
+            'method' => 'POST',
+        ]);
+    }
+
+    private function createEditForm(Project $project): FormInterface
+    {
+        $event = new ProjectMetaDefinitionEvent($project);
+        $this->dispatcher->dispatch($event);
+
+        $currency = $this->configuration->getCustomerDefaultCurrency();
+        $url = $this->generateUrl('admin_project_create');
+
+        if ($project->getId() !== null) {
             $url = $this->generateUrl('admin_project_edit', ['id' => $project->getId()]);
             $currency = $project->getCustomer()->getCurrency();
         }
@@ -231,6 +440,7 @@ class ProjectController extends AbstractController
             'method' => 'POST',
             'currency' => $currency,
             'create_more' => true,
+            'include_budget' => $this->isGranted('budget', $project)
         ]);
     }
 }

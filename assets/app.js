@@ -4,32 +4,63 @@
 // - removing moment locales which are not used
 // - removing fullcalendar locales which are not used
 // - removing icheck which is not used
-// - removing jquery-ui which is not used?
+// - removing jquery-ui which is not used
 
 const $ = require('jquery');
 global.$ = global.jQuery = $;
 
 require('bootstrap-sass');
 require('jquery-slimscroll');
-require('bootstrap-select');
+
+require('select2');
+require('select2/dist/js/i18n/ar');
+require('select2/dist/js/i18n/cs');
+require('select2/dist/js/i18n/da');
+require('select2/dist/js/i18n/de');
+require('select2/dist/js/i18n/es');
+require('select2/dist/js/i18n/eu');
+require('select2/dist/js/i18n/fr');
+require('select2/dist/js/i18n/hu');
+require('select2/dist/js/i18n/it');
+require('select2/dist/js/i18n/ja');
+require('select2/dist/js/i18n/ko');
+require('select2/dist/js/i18n/nl');
+require('select2/dist/js/i18n/pt-BR');
+require('select2/dist/js/i18n/ru');
+require('select2/dist/js/i18n/sk');
+require('select2/dist/js/i18n/sv');
+require('select2/dist/js/i18n/tr');
+require('select2/dist/js/i18n/zh-CN');
 
 const Moment = require('moment');
 global.moment = Moment;
-require('moment/locale/de');
-require('moment/locale/it');
-require('moment/locale/fr');
-require('moment/locale/es');
-require('moment/locale/ru');
 require('moment/locale/ar');
+require('moment/locale/cs');
+require('moment/locale/da');
+require('moment/locale/de');
+require('moment/locale/de-ch');
+require('moment/locale/es');
+require('moment/locale/eu');
+require('moment/locale/fr');
 require('moment/locale/hu');
-require('moment/locale/pt-br');
-require('moment/locale/sv');
+require('moment/locale/it');
 require('moment/locale/ja');
+require('moment/locale/ko');
+require('moment/locale/nl');
+require('moment/locale/pt-br');
+require('moment/locale/ru');
+require('moment/locale/sk');
+require('moment/locale/sv');
+require('moment/locale/tr');
+require('moment/locale/zh-cn');
 
 require('daterangepicker');
 
+const Sortable = require('sortablejs/Sortable.min');
+global.Sortable = Sortable;
+
 // ------ AdminLTE framework ------
-require('../vendor/kevinpapst/adminlte-bundle/Resources/assets/admin-lte.scss');
+require('./sass/admin-lte.scss');
 require('admin-lte/dist/css/AdminLTE.min.css');
 require('admin-lte/dist/css/skins/_all-skins.css');
 require('../vendor/kevinpapst/adminlte-bundle/Resources/assets/admin-lte-extensions.scss');
@@ -37,35 +68,15 @@ require('../vendor/kevinpapst/adminlte-bundle/Resources/assets/admin-lte-extensi
 global.$.AdminLTE = {};
 global.$.AdminLTE.options = {};
 require('admin-lte/dist/js/adminlte.min');
-
-require('../vendor/kevinpapst/adminlte-bundle/Resources/assets/default_avatar.png');
-
 // ------------------- INLINED ADMIN-LTE DEFINITIONS -------------------
 // ---------------------------------------------------------------------
 
 require('./sass/app.scss');
 
-require('fullcalendar');
-require('fullcalendar/dist/gcal.min');
-require('fullcalendar/dist/locale/de');
-require('fullcalendar/dist/locale/it');
-require('fullcalendar/dist/locale/fr');
-require('fullcalendar/dist/locale/es');
-require('fullcalendar/dist/locale/ru');
-require('fullcalendar/dist/locale/ar');
-require('fullcalendar/dist/locale/hu');
-require('fullcalendar/dist/locale/pt-br');
-require('fullcalendar/dist/locale/sv');
-require('fullcalendar/dist/locale/ja');
-require('fullcalendar/dist/fullcalendar.min.css');
-
-// ------ for charts ------
-require('chart.js/dist/Chart.min');
-
 // ------ Kimai itself ------
 require('./js/KimaiWebLoader.js');
-require('./images/default_avatar.png');
-require('./images/signature.png');
+global.KimaiPaginatedBoxWidget = require('./js/widgets/KimaiPaginatedBoxWidget').default;
+global.KimaiReloadPageWidget = require('./js/widgets/KimaiReloadPageWidget').default;
 
-// ------ Autocomplete ------
+// ------ Autocomplete for tags only ------
 require('jquery-ui/ui/widgets/autocomplete');

@@ -12,22 +12,34 @@ namespace App\Tests\API;
 use App\Entity\Activity;
 use App\Entity\Customer;
 use App\Entity\Project;
+use App\Entity\Tag;
 use App\Entity\Timesheet;
+use App\Entity\TimesheetMeta;
 use App\Entity\User;
 use App\Tests\DataFixtures\TimesheetFixtures;
+use App\Tests\Mocks\Security\UserDateTimeFactoryFactory;
+use App\Tests\Mocks\TimesheetTestMetaFieldSubscriberMock;
+use App\Timesheet\UserDateTimeFactory;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
- * @coversDefaultClass \App\API\TimesheetController
  * @group integration
  */
 class TimesheetControllerTest extends APIControllerBaseTest
 {
     public const DATE_FORMAT = 'Y-m-d H:i:s';
+    public const DATE_FORMAT_HTML5 = 'Y-m-d\TH:i:s';
+    public const TEST_TIMEZONE = 'Europe/London';
 
-    public function setUp()
+    /**
+     * @var UserDateTimeFactory
+     */
+    protected $dateTime;
+
+    protected function setUp(): void
     {
         $this->importFixtureForUser(User::ROLE_USER);
+        $this->dateTime = (new UserDateTimeFactoryFactory($this))->create(self::TEST_TIMEZONE);
     }
 
     protected function importFixtureForUser(string $role)
@@ -62,6 +74,19 @@ class TimesheetControllerTest extends APIControllerBaseTest
         $this->assertNotEmpty($result);
         $this->assertEquals(10, count($result));
         $this->assertDefaultStructure($result[0], false);
+    }
+
+    public function testGetCollectionFull()
+    {
+        $client = $this->getClientForAuthenticatedUser(User::ROLE_USER);
+        $this->assertAccessIsGranted($client, '/api/timesheets', 'GET', ['full' => 'true']);
+        $result = json_decode($client->getResponse()->getContent(), true);
+
+        $this->assertIsArray($result);
+        $this->assertNotEmpty($result);
+        $this->assertEquals(10, count($result));
+        $this->assertDefaultStructure($result[0], false);
+        $this->assertHasSubresources($result[0]);
     }
 
     public function testGetCollectionForOtherUser()
@@ -141,10 +166,11 @@ class TimesheetControllerTest extends APIControllerBaseTest
             'order' => 'DESC',
             'orderBy' => 'rate',
             'active' => 0,
-            'begin' => $begin->format('Y-m-d H:i:s'),
-            'end' => $end->format('Y-m-d H:i:s'),
+            'begin' => $begin->format(self::DATE_FORMAT_HTML5),
+            'end' => $end->format(self::DATE_FORMAT_HTML5),
             'exported' => 0,
         ];
+
         $client = $this->getClientForAuthenticatedUser(User::ROLE_USER);
         $this->assertAccessIsGranted($client, '/api/timesheets', 'GET', $query);
         $result = json_decode($client->getResponse()->getContent(), true);
@@ -178,10 +204,11 @@ class TimesheetControllerTest extends APIControllerBaseTest
         $query = [
             'page' => 1,
             'size' => 50,
-            'begin' => $begin->format('Y-m-d H:i:s'),
-            'end' => $end->format('Y-m-d H:i:s'),
+            'begin' => $begin->format(self::DATE_FORMAT_HTML5),
+            'end' => $end->format(self::DATE_FORMAT_HTML5),
             'exported' => 1,
         ];
+
         $client = $this->getClientForAuthenticatedUser(User::ROLE_USER);
         $this->assertAccessIsGranted($client, '/api/timesheets', 'GET', $query);
         $result = json_decode($client->getResponse()->getContent(), true);
@@ -194,10 +221,11 @@ class TimesheetControllerTest extends APIControllerBaseTest
         $query = [
             'page' => 1,
             'size' => 50,
-            'begin' => $begin->format('Y-m-d H:i:s'),
-            'end' => $end->format('Y-m-d H:i:s'),
+            'begin' => $begin->format(self::DATE_FORMAT_HTML5),
+            'end' => $end->format(self::DATE_FORMAT_HTML5),
             'exported' => 0,
         ];
+
         $client = $this->getClientForAuthenticatedUser(User::ROLE_USER);
         $this->assertAccessIsGranted($client, '/api/timesheets', 'GET', $query);
         $result = json_decode($client->getResponse()->getContent(), true);
@@ -210,8 +238,8 @@ class TimesheetControllerTest extends APIControllerBaseTest
         $query = [
             'page' => 1,
             'size' => 50,
-            'begin' => $begin->format('Y-m-d H:i:s'),
-            'end' => $end->format('Y-m-d H:i:s'),
+            'begin' => $begin->format(self::DATE_FORMAT_HTML5),
+            'end' => $end->format(self::DATE_FORMAT_HTML5),
         ];
         $client = $this->getClientForAuthenticatedUser(User::ROLE_USER);
         $this->assertAccessIsGranted($client, '/api/timesheets', 'GET', $query);
@@ -262,8 +290,8 @@ class TimesheetControllerTest extends APIControllerBaseTest
         $data = [
             'activity' => 1,
             'project' => 1,
-            'begin' => (new \DateTime('- 8 hours'))->format('Y-m-d H:m'),
-            'end' => (new \DateTime())->format('Y-m-d H:m'),
+            'begin' => ($this->dateTime->createDateTime('- 16 hours'))->format('Y-m-d H:m:0'),
+            'end' => ($this->dateTime->createDateTime())->format('Y-m-d H:m:0'),
             'description' => 'foo',
             'fixedRate' => 2016,
             'hourlyRate' => 127
@@ -275,18 +303,18 @@ class TimesheetControllerTest extends APIControllerBaseTest
         $this->assertIsArray($result);
         $this->assertDefaultStructure($result);
         $this->assertNotEmpty($result['id']);
-        $this->assertEquals(28800, $result['duration']);
+        $this->assertTrue($result['duration'] == 57600 || $result['duration'] == 57660); // 1 minute rounding might be applied
         $this->assertEquals(2016, $result['rate']);
     }
 
     // check for project, as this is a required field. It will not be included in the select, as it is
     // already filtered within the repository due to the hidden customer
-    public function testPostActionWithInvisibleProject()
+    public function testPostActionWithInvisibleProjectIsAccepted()
     {
         $client = $this->getClientForAuthenticatedUser(User::ROLE_USER);
 
         $em = $client->getContainer()->get('doctrine.orm.entity_manager');
-        $customer = (new Customer())->setName('foo-bar-1')->setVisible(false)->setCountry('DE')->setTimezone('Euopre/Berlin');
+        $customer = (new Customer())->setName('foo-bar-1')->setVisible(false)->setCountry('DE')->setTimezone('Europe/Berlin');
         $em->persist($customer);
         $project = (new Project())->setName('foo-bar-2')->setVisible(true)->setCustomer($customer);
         $em->persist($project);
@@ -314,7 +342,7 @@ class TimesheetControllerTest extends APIControllerBaseTest
         $client = $this->getClientForAuthenticatedUser(User::ROLE_USER);
 
         $em = $client->getContainer()->get('doctrine.orm.entity_manager');
-        $customer = (new Customer())->setName('foo-bar-1')->setVisible(true)->setCountry('DE')->setTimezone('Euopre/Berlin');
+        $customer = (new Customer())->setName('foo-bar-1')->setVisible(true)->setCountry('DE')->setTimezone('Europe/Berlin');
         $em->persist($customer);
         $project = (new Project())->setName('foo-bar-2')->setVisible(true)->setCustomer($customer);
         $em->persist($project);
@@ -341,8 +369,8 @@ class TimesheetControllerTest extends APIControllerBaseTest
         $data = [
             'activity' => 1,
             'project' => 1,
-            'begin' => (new \DateTime('- 7 hours'))->format('Y-m-d\TH:m'),
-            'end' => (new \DateTime())->format('Y-m-d\TH:m'),
+            'begin' => ($this->dateTime->createDateTime('- 7 hours'))->format('Y-m-d\TH:m:0'),
+            'end' => ($this->dateTime->createDateTime())->format('Y-m-d\TH:m:0'),
             'description' => 'foo',
             'exported' => true,
         ];
@@ -411,6 +439,8 @@ class TimesheetControllerTest extends APIControllerBaseTest
         $this->assertApiCallValidationError($response, ['end', 'activity']);
     }
 
+    // TODO: TEST PATCH FOR EXPORTED TIMESHEET FOR USER WITHOUT PERMISSION IS REJECTED
+
     public function testDeleteAction()
     {
         $client = $this->getClientForAuthenticatedUser(User::ROLE_USER);
@@ -462,6 +492,36 @@ class TimesheetControllerTest extends APIControllerBaseTest
         $this->assertEquals('You are not allowed to delete this timesheet', $json['message']);
     }
 
+    public function testDeleteActionForExportedRecordIsNotAllowed()
+    {
+        $client = $this->getClientForAuthenticatedUser(User::ROLE_USER);
+
+        $em = $client->getContainer()->get('doctrine.orm.entity_manager');
+        /** @var Timesheet $timesheet */
+        $timesheet = $em->getRepository(Timesheet::class)->find(1);
+        $timesheet->setExported(true);
+        $em->persist($timesheet);
+        $em->flush($timesheet);
+
+        $this->request($client, '/api/timesheets/1', 'DELETE');
+        $this->assertApiResponseAccessDenied($client->getResponse(), 'You are not allowed to delete this timesheet');
+    }
+
+    public function testDeleteActionForExportedRecordIsAllowedForAdmin()
+    {
+        $client = $this->getClientForAuthenticatedUser(User::ROLE_ADMIN);
+
+        $em = $client->getContainer()->get('doctrine.orm.entity_manager');
+        /** @var Timesheet $timesheet */
+        $timesheet = $em->getRepository(Timesheet::class)->find(1);
+        $timesheet->setExported(true);
+        $em->persist($timesheet);
+        $em->flush($timesheet);
+
+        $this->request($client, '/api/timesheets/1', 'DELETE');
+        $this->assertTrue($client->getResponse()->isSuccessful());
+    }
+
     public function testGetRecentCollectionWithSubresources()
     {
         $client = $this->getClientForAuthenticatedUser(User::ROLE_TEAMLEAD);
@@ -482,7 +542,7 @@ class TimesheetControllerTest extends APIControllerBaseTest
         $query = [
             'user' => 'all',
             'size' => 2,
-            'begin' => $start->format(self::DATE_FORMAT),
+            'begin' => $start->format(self::DATE_FORMAT_HTML5),
         ];
 
         $this->assertAccessIsGranted($client, '/api/timesheets/recent', 'GET', $query);
@@ -560,7 +620,7 @@ class TimesheetControllerTest extends APIControllerBaseTest
 
     public function testStopThrowsNotFound()
     {
-        $this->assertEntityNotFound(User::ROLE_USER, '/api/timesheets/11/stop', 'PATCH');
+        $this->assertEntityNotFoundForPatch(User::ROLE_USER, '/api/timesheets/11/stop', []);
     }
 
     public function testStopNotAllowedForUser()
@@ -620,7 +680,7 @@ class TimesheetControllerTest extends APIControllerBaseTest
         $this->assertEquals(10, count($result));
         $this->assertDefaultStructure($result[0], false);
 
-        $query = ['tags' => 'Nothing'];
+        $query = ['tags' => 'Nothing-2-see,here'];
         $this->assertAccessIsGranted($client, '/api/timesheets', 'GET', $query);
         $result = json_decode($client->getResponse()->getContent(), true);
 
@@ -663,14 +723,19 @@ class TimesheetControllerTest extends APIControllerBaseTest
     {
         $client = $this->getClientForAuthenticatedUser(User::ROLE_USER);
 
-        $data = [
-            'description' => 'foo',
-            'tags' => 'another,testing,bar'
-        ];
-        $this->request($client, '/api/timesheets/1', 'PATCH', [], json_encode($data));
-        $this->assertTrue($client->getResponse()->isSuccessful());
-
         $em = $client->getContainer()->get('doctrine.orm.entity_manager');
+        /** @var Timesheet $timesheet */
+        $timesheet = $em->getRepository(Timesheet::class)->find(1);
+        $timesheet->setDescription('foo');
+        $timesheet->addTag((new Tag())->setName('another'));
+        $timesheet->addTag((new Tag())->setName('testing'));
+        $timesheet->addTag((new Tag())->setName('bar'));
+        $timesheet->setMetaField((new TimesheetMeta())->setName('sdfsdf')->setValue('nnnnn')->setIsVisible(true));
+        $timesheet->setMetaField((new TimesheetMeta())->setName('xxxxxxx')->setValue('asdasdasd'));
+        $timesheet->setMetaField((new TimesheetMeta())->setName('1234567890')->setValue('1234567890')->setIsVisible(true));
+        $em->persist($timesheet);
+        $em->flush($timesheet);
+
         $timesheet = $em->getRepository(Timesheet::class)->find(1);
         $this->assertEquals('foo', $timesheet->getDescription());
 
@@ -680,6 +745,7 @@ class TimesheetControllerTest extends APIControllerBaseTest
         $result = json_decode($client->getResponse()->getContent(), true);
         $this->assertDefaultStructure($result, true);
         $this->assertEquals('foo', $result['description']);
+        $this->assertEquals([['name' => 'sdfsdf', 'value' => 'nnnnn'], ['name' => '1234567890', 'value' => '1234567890']], $result['metaFields']);
         $this->assertEquals(['another', 'testing', 'bar'], $result['tags']);
 
         $em = $client->getContainer()->get('doctrine.orm.entity_manager');
@@ -715,10 +781,102 @@ class TimesheetControllerTest extends APIControllerBaseTest
         $this->assertApiResponseAccessDenied($client->getResponse(), 'You are not allowed to re-start this timesheet');
     }
 
+    public function testRestartThrowsNotFound()
+    {
+        $this->assertEntityNotFoundForPatch(User::ROLE_USER, '/api/timesheets/42/restart', []);
+    }
+
+    public function testExportAction()
+    {
+        $client = $this->getClientForAuthenticatedUser(User::ROLE_ADMIN);
+
+        $em = $client->getContainer()->get('doctrine.orm.entity_manager');
+        /** @var Timesheet $timesheet */
+        $timesheet = $em->getRepository(Timesheet::class)->find(1);
+        $this->assertEquals(false, $timesheet->isExported());
+
+        $this->request($client, '/api/timesheets/1/export', 'PATCH');
+        $this->assertTrue($client->getResponse()->isSuccessful());
+        $this->assertDefaultStructure(json_decode($client->getResponse()->getContent(), true), true);
+
+        $em = $client->getContainer()->get('doctrine.orm.entity_manager');
+        /** @var Timesheet $timesheet */
+        $timesheet = $em->getRepository(Timesheet::class)->find(1);
+        $this->assertEquals(true, $timesheet->isExported());
+
+        $this->request($client, '/api/timesheets/1/export', 'PATCH');
+        $this->assertTrue($client->getResponse()->isSuccessful());
+
+        $em = $client->getContainer()->get('doctrine.orm.entity_manager');
+        $timesheet = $em->getRepository(Timesheet::class)->find(1);
+        $this->assertEquals(false, $timesheet->isExported());
+    }
+
+    public function testExportNotAllowedForUser()
+    {
+        $client = $this->getClientForAuthenticatedUser(User::ROLE_USER);
+
+        $this->request($client, '/api/timesheets/1/export', 'PATCH');
+        $this->assertApiResponseAccessDenied($client->getResponse(), 'You are not allowed to lock this timesheet');
+    }
+
+    public function testExportThrowsNotFound()
+    {
+        $this->assertEntityNotFoundForPatch(User::ROLE_ADMIN, '/api/timesheets/42/export', []);
+    }
+
+    public function testMetaActionThrowsNotFound()
+    {
+        $this->assertEntityNotFoundForPatch(User::ROLE_ADMIN, '/api/timesheets/42/meta', []);
+    }
+
+    public function testMetaActionThrowsExceptionOnMissingName()
+    {
+        return $this->assertExceptionForPatchAction(User::ROLE_ADMIN, '/api/timesheets/1/meta', ['value' => 'X'], [
+            'code' => 400,
+            'message' => 'Parameter "name" of value "NULL" violated a constraint "This value should not be null."'
+        ]);
+    }
+
+    public function testMetaActionThrowsExceptionOnMissingValue()
+    {
+        return $this->assertExceptionForPatchAction(User::ROLE_ADMIN, '/api/timesheets/1/meta', ['name' => 'X'], [
+            'code' => 400,
+            'message' => 'Parameter "value" of value "NULL" violated a constraint "This value should not be null."'
+        ]);
+    }
+
+    public function testMetaActionThrowsExceptionOnMissingMetafield()
+    {
+        return $this->assertExceptionForPatchAction(User::ROLE_ADMIN, '/api/timesheets/1/meta', ['name' => 'X', 'value' => 'Y'], [
+            'code' => 500,
+            'message' => 'Unknown meta-field requested'
+        ]);
+    }
+
+    public function testMetaAction()
+    {
+        $client = $this->getClientForAuthenticatedUser(User::ROLE_USER);
+        $client->getContainer()->get('event_dispatcher')->addSubscriber(new TimesheetTestMetaFieldSubscriberMock());
+
+        $data = [
+            'name' => 'metatestmock',
+            'value' => 'another,testing,bar'
+        ];
+        $this->request($client, '/api/timesheets/1/meta', 'PATCH', [], json_encode($data));
+
+        $this->assertTrue($client->getResponse()->isSuccessful());
+
+        $em = $client->getContainer()->get('doctrine.orm.entity_manager');
+        /** @var Timesheet $timesheet */
+        $timesheet = $em->getRepository(Timesheet::class)->find(1);
+        $this->assertEquals('another,testing,bar', $timesheet->getMetaField('metatestmock')->getValue());
+    }
+
     protected function assertDefaultStructure(array $result, $full = true)
     {
         $expectedKeys = [
-            'id', 'begin', 'end', 'duration', 'description', 'rate', 'activity', 'project', 'tags', 'user'
+            'id', 'begin', 'end', 'duration', 'description', 'rate', 'activity', 'project', 'tags', 'user', 'metaFields'
         ];
 
         if ($full) {

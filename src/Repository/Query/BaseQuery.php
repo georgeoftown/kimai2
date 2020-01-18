@@ -9,6 +9,11 @@
 
 namespace App\Repository\Query;
 
+use App\Entity\Team;
+use App\Entity\User;
+use App\Utils\SearchTerm;
+use Symfony\Component\Form\FormErrorIterator;
+
 /**
  * Base class for advanced Repository queries.
  */
@@ -20,34 +25,107 @@ class BaseQuery
     public const DEFAULT_PAGESIZE = 50;
     public const DEFAULT_PAGE = 1;
 
+    /**
+     * @deprecated since 1.4, will be removed with 2.0
+     */
     public const RESULT_TYPE_OBJECTS = 'Objects';
+    /**
+     * @deprecated since 1.4, will be removed with 2.0
+     */
     public const RESULT_TYPE_PAGER = 'PagerFanta';
+    /**
+     * @deprecated since 1.4, will be removed with 2.0
+     */
     public const RESULT_TYPE_QUERYBUILDER = 'QueryBuilder';
 
-    /**
-     * @var object
-     */
-    protected $hiddenEntity;
+    private $defaults = [
+        'page' => self::DEFAULT_PAGE,
+        'pageSize' => self::DEFAULT_PAGESIZE,
+        'orderBy' => 'id',
+        'order' => self::ORDER_ASC,
+        'searchTerm' => null,
+    ];
     /**
      * @var int
      */
-    protected $page = self::DEFAULT_PAGE;
+    private $page = self::DEFAULT_PAGE;
     /**
      * @var int
      */
-    protected $pageSize = self::DEFAULT_PAGESIZE;
+    private $pageSize = self::DEFAULT_PAGESIZE;
     /**
      * @var string
      */
-    protected $orderBy = 'id';
+    private $orderBy = 'id';
     /**
      * @var string
      */
-    protected $order = self::ORDER_ASC;
+    private $order = self::ORDER_ASC;
     /**
      * @var string
+     * @deprecated since 1.4, will be removed with 2.0
      */
-    protected $resultType = self::RESULT_TYPE_PAGER;
+    private $resultType = self::RESULT_TYPE_PAGER;
+    /**
+     * @var User
+     */
+    private $currentUser;
+    /**
+     * @var Team[]
+     */
+    private $teams = [];
+    /**
+     * @var SearchTerm|null
+     */
+    private $searchTerm;
+
+    /**
+     * @param Team[] $teams
+     * @return $this
+     */
+    public function setTeams(?array $teams): self
+    {
+        $this->teams = [];
+
+        if (null !== $teams) {
+            foreach ($teams as $team) {
+                $this->addTeam($team);
+            }
+        }
+
+        return $this;
+    }
+
+    public function addTeam(Team $team): self
+    {
+        $this->teams[$team->getId()] = $team;
+
+        return $this;
+    }
+
+    /**
+     * @return Team[]
+     */
+    public function getTeams(): array
+    {
+        return array_values($this->teams);
+    }
+
+    public function getCurrentUser(): ?User
+    {
+        return $this->currentUser;
+    }
+
+    /**
+     * @param User $user
+     * @return self
+     */
+    public function setCurrentUser(User $user)
+    {
+        $this->currentUser = $user;
+
+        return $this;
+    }
 
     /**
      * @return int
@@ -59,7 +137,7 @@ class BaseQuery
 
     /**
      * @param int $page
-     * @return $this
+     * @return self
      */
     public function setPage($page)
     {
@@ -68,31 +146,25 @@ class BaseQuery
         return $this;
     }
 
-    /**
-     * @return int
-     */
-    public function getPageSize()
+    public function getPageSize(): int
     {
         return $this->pageSize;
     }
 
     /**
      * @param int $pageSize
-     * @return $this
+     * @return self
      */
     public function setPageSize($pageSize)
     {
-        if (!empty($pageSize) && (int) $pageSize > 0) {
+        if ($pageSize !== null && (int) $pageSize > 0) {
             $this->pageSize = (int) $pageSize;
         }
 
         return $this;
     }
 
-    /**
-     * @return string
-     */
-    public function getOrderBy()
+    public function getOrderBy(): string
     {
         return $this->orderBy;
     }
@@ -101,7 +173,7 @@ class BaseQuery
      * You need to validate carefully if this value is used from a user-input.
      *
      * @param string $orderBy
-     * @return $this
+     * @return self
      */
     public function setOrderBy($orderBy)
     {
@@ -110,17 +182,14 @@ class BaseQuery
         return $this;
     }
 
-    /**
-     * @return string
-     */
-    public function getOrder()
+    public function getOrder(): string
     {
         return $this->order;
     }
 
     /**
      * @param string $order
-     * @return $this
+     * @return self
      */
     public function setOrder($order)
     {
@@ -132,47 +201,97 @@ class BaseQuery
     }
 
     /**
+     * @deprecated since 1.0
      * @return string
      */
     public function getResultType()
     {
+        @trigger_error('BaseQuery::getResultType() is deprecated and will be removed with 2.0', E_USER_DEPRECATED);
+
         return $this->resultType;
     }
 
-    /**
-     * @param $resultType
-     * @return $this
-     * @throws \InvalidArgumentException
-     */
-    public function setResultType(string $resultType)
+    public function hasSearchTerm(): bool
     {
-        $allowed = [self::RESULT_TYPE_PAGER, self::RESULT_TYPE_QUERYBUILDER, self::RESULT_TYPE_OBJECTS];
+        return null !== $this->searchTerm;
+    }
 
-        if (!in_array($resultType, $allowed)) {
-            throw new \InvalidArgumentException('Unsupported query result type');
+    public function getSearchTerm(): ?SearchTerm
+    {
+        return $this->searchTerm;
+    }
+
+    /**
+     * @param SearchTerm|null $searchTerm
+     * @return self
+     */
+    public function setSearchTerm(?SearchTerm $searchTerm)
+    {
+        $this->searchTerm = $searchTerm;
+
+        return $this;
+    }
+
+    protected function set($name, $value)
+    {
+        $method = 'set' . ucfirst($name);
+        if (method_exists($this, $method)) {
+            $this->{$method}($value);
+        } elseif (property_exists($this, $name)) {
+            $this->$name = $value;
+        }
+    }
+
+    /**
+     * @param array $defaults
+     * @return self
+     */
+    protected function setDefaults(array $defaults)
+    {
+        $this->defaults = array_merge($this->defaults, $defaults);
+        foreach ($this->defaults as $key => $value) {
+            $this->set($key, $value);
         }
 
-        $this->resultType = $resultType;
-
         return $this;
     }
 
     /**
-     * @return object
+     * @param FormErrorIterator $errors
+     * @return self
      */
-    public function getHiddenEntity()
+    public function resetByFormError(FormErrorIterator $errors)
     {
-        return $this->hiddenEntity;
-    }
-
-    /**
-     * @param object|string $hiddenEntity
-     * @return BaseQuery
-     */
-    public function setHiddenEntity($hiddenEntity)
-    {
-        $this->hiddenEntity = $hiddenEntity;
+        foreach ($errors as $error) {
+            $key = $error->getOrigin()->getName();
+            if (array_key_exists($key, $this->defaults)) {
+                $this->set($key, $this->defaults[$key]);
+            }
+        }
 
         return $this;
+    }
+
+    public function copyTo(BaseQuery $query): BaseQuery
+    {
+        $query->setDefaults($this->defaults);
+        if (null !== $this->getCurrentUser()) {
+            $query->setCurrentUser($this->getCurrentUser());
+        }
+        $query->setOrder($this->getOrder());
+        $query->setOrderBy($this->getOrderBy());
+        $query->setSearchTerm($this->getSearchTerm());
+        $query->setPage($this->getPage());
+        $query->setPageSize($this->getPageSize());
+
+        foreach ($this->getTeams() as $team) {
+            $query->addTeam($team);
+        }
+
+        if ($this instanceof VisibilityInterface && $query instanceof VisibilityInterface) {
+            $query->setVisibility($this->getVisibility());
+        }
+
+        return $query;
     }
 }

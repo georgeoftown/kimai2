@@ -10,6 +10,7 @@
 namespace App\Voter;
 
 use App\Entity\Activity;
+use App\Entity\Team;
 use App\Entity\User;
 use Symfony\Component\Security\Core\Authentication\Token\TokenInterface;
 
@@ -20,6 +21,7 @@ class ActivityVoter extends AbstractVoter
 {
     public const VIEW = 'view';
     public const EDIT = 'edit';
+    public const BUDGET = 'budget';
     public const DELETE = 'delete';
 
     /**
@@ -28,7 +30,8 @@ class ActivityVoter extends AbstractVoter
     public const ALLOWED_ATTRIBUTES = [
         self::VIEW,
         self::EDIT,
-        self::DELETE
+        self::BUDGET,
+        self::DELETE,
     ];
 
     /**
@@ -63,6 +66,48 @@ class ActivityVoter extends AbstractVoter
             return false;
         }
 
-        return $this->hasRolePermission($user, $attribute . '_activity');
+        if ($this->hasRolePermission($user, $attribute . '_activity')) {
+            return true;
+        }
+
+        // new and global activities have no project
+        if (null === ($project = $subject->getProject())) {
+            return false;
+        }
+
+        $hasTeamleadPermission = $this->hasRolePermission($user, $attribute . '_teamlead_activity');
+        $hasTeamPermission = $this->hasRolePermission($user, $attribute . '_team_activity');
+
+        if (!$hasTeamleadPermission && !$hasTeamPermission) {
+            return false;
+        }
+
+        /** @var Team $team */
+        foreach ($project->getTeams() as $team) {
+            if ($hasTeamleadPermission && $user->isTeamleadOf($team)) {
+                return true;
+            }
+
+            if ($hasTeamPermission && $user->isInTeam($team)) {
+                return true;
+            }
+        }
+
+        if (null === ($customer = $project->getCustomer())) {
+            return false;
+        }
+
+        /** @var Team $team */
+        foreach ($customer->getTeams() as $team) {
+            if ($hasTeamleadPermission && $user->isTeamleadOf($team)) {
+                return true;
+            }
+
+            if ($hasTeamPermission && $user->isInTeam($team)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

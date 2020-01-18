@@ -21,11 +21,7 @@ use Symfony\Component\HttpFoundation\Response;
  */
 abstract class APIControllerBaseTest extends ControllerBaseTest
 {
-    /**
-     * @param string $role
-     * @return Client
-     */
-    protected function getClientForAuthenticatedUser(string $role = User::ROLE_USER)
+    protected function getClientForAuthenticatedUser(string $role = User::ROLE_USER): Client
     {
         switch ($role) {
             case User::ROLE_SUPER_ADMIN:
@@ -57,8 +53,7 @@ abstract class APIControllerBaseTest extends ControllerBaseTest
                 break;
 
             default:
-                $client = null;
-                break;
+                throw new \Exception(sprintf('Unknown role "%s"', $role));
         }
 
         return $client;
@@ -74,11 +69,6 @@ abstract class APIControllerBaseTest extends ControllerBaseTest
         return '/' . ltrim($url, '/') . ($json ? '.json' : '');
     }
 
-    /**
-     * @param Client $client
-     * @param string $url
-     * @param string $method
-     */
     protected function assertRequestIsSecured(Client $client, string $url, $method = 'GET')
     {
         $this->request($client, $url, $method);
@@ -93,14 +83,14 @@ abstract class APIControllerBaseTest extends ControllerBaseTest
     {
         $data = ['message' => 'Authentication required, missing headers: X-AUTH-USER, X-AUTH-TOKEN'];
 
-        $this->assertEquals(
+        self::assertEquals(
             $data,
             json_decode($response->getContent(), true),
             sprintf('The secure URL %s is not protected.', $url)
         );
 
-        $this->assertEquals(
-            Response::HTTP_FORBIDDEN, // TODO that should actually be Response::HTTP_UNAUTHORIZED
+        self::assertEquals(
+            Response::HTTP_FORBIDDEN,
             $response->getStatusCode(),
             sprintf('The secure URL %s has the wrong status code %s.', $url, $response->getStatusCode())
         );
@@ -116,7 +106,7 @@ abstract class APIControllerBaseTest extends ControllerBaseTest
         $client = $this->getClientForAuthenticatedUser($role);
         $client->request($method, $this->createUrl($url));
 
-        $this->assertFalse(
+        self::assertFalse(
             $client->getResponse()->isSuccessful(),
             sprintf('The secure URL %s is not protected for role %s', $url, $role)
         );
@@ -126,34 +116,21 @@ abstract class APIControllerBaseTest extends ControllerBaseTest
             'message' => 'Access denied.'
         ];
 
-        $this->assertEquals(403, $client->getResponse()->getStatusCode());
+        self::assertEquals(403, $client->getResponse()->getStatusCode());
 
-        $this->assertEquals(
+        self::assertEquals(
             $expected,
             json_decode($client->getResponse()->getContent(), true)
         );
     }
 
-    /**
-     * @param Client $client
-     * @param string $url
-     * @param string $method
-     * @param array $parameters
-     * @param string $content
-     * @return Crawler
-     */
-    protected function request(Client $client, string $url, $method = 'GET', array $parameters = [], string $content = null)
+    protected function request(Client $client, string $url, $method = 'GET', array $parameters = [], string $content = null): Crawler
     {
         $server = ['HTTP_CONTENT_TYPE' => 'application/json', 'CONTENT_TYPE' => 'application/json'];
 
         return $client->request($method, $this->createUrl($url), $parameters, [], $server, $content);
     }
 
-    /**
-     * @param string $role
-     * @param string $url
-     * @param string $method
-     */
     protected function assertEntityNotFound(string $role, string $url, string $method = 'GET')
     {
         $client = $this->getClientForAuthenticatedUser($role);
@@ -164,117 +141,103 @@ abstract class APIControllerBaseTest extends ControllerBaseTest
             'message' => 'Not found'
         ];
 
-        $this->assertEquals(404, $client->getResponse()->getStatusCode());
+        self::assertEquals(404, $client->getResponse()->getStatusCode());
 
-        $this->assertEquals(
+        self::assertEquals(
             $expected,
             json_decode($client->getResponse()->getContent(), true)
         );
     }
 
-    /**
-     * @param string $role
-     * @param string $url
-     * @param array $data
-     */
     protected function assertEntityNotFoundForPatch(string $role, string $url, array $data)
+    {
+        return $this->assertExceptionForPatchAction($role, $url, $data, [
+            'code' => 404,
+            'message' => 'Not found'
+        ]);
+    }
+
+    protected function assertExceptionForPatchAction(string $role, string $url, array $data, array $expectedErrors)
     {
         $client = $this->getClientForAuthenticatedUser($role);
 
         $this->request($client, $url, 'PATCH', [], json_encode($data));
         $response = $client->getResponse();
-        $this->assertFalse($response->isSuccessful());
+        self::assertFalse($response->isSuccessful());
 
-        $expected = [
-            'code' => 404,
-            'message' => 'Not found'
-        ];
+        self::assertEquals($expectedErrors['code'], $client->getResponse()->getStatusCode());
 
-        $this->assertEquals(404, $client->getResponse()->getStatusCode());
-
-        $this->assertEquals(
-            $expected,
+        self::assertEquals(
+            $expectedErrors,
             json_decode($client->getResponse()->getContent(), true)
         );
     }
 
-    /**
-     * @param string $role
-     * @param string $url
-     * @param array $data
-     */
     protected function assertEntityNotFoundForDelete(string $role, string $url, array $data)
     {
         $client = $this->getClientForAuthenticatedUser($role);
 
         $this->request($client, $url, 'DELETE', [], json_encode($data));
         $response = $client->getResponse();
-        $this->assertFalse($response->isSuccessful());
+        self::assertFalse($response->isSuccessful());
 
         $expected = [
             'code' => 404,
             'message' => 'Not found'
         ];
 
-        $this->assertEquals(404, $client->getResponse()->getStatusCode());
+        self::assertEquals(404, $client->getResponse()->getStatusCode());
 
-        $this->assertEquals(
+        self::assertEquals(
             $expected,
             json_decode($client->getResponse()->getContent(), true)
         );
     }
 
-    /**
-     * @param Response $response
-     * @param string $message
-     */
     protected function assertApiException(Response $response, string $message)
     {
-        $this->assertFalse($response->isSuccessful());
-        $this->assertEquals(500, $response->getStatusCode());
-        $this->assertEquals(['code' => 500, 'message' => $message], json_decode($response->getContent(), true));
+        self::assertFalse($response->isSuccessful());
+        self::assertEquals(500, $response->getStatusCode());
+        self::assertEquals(['code' => 500, 'message' => $message], json_decode($response->getContent(), true));
     }
 
-    /**
-     * @param Client $client
-     * @param string $url
-     * @param string $message
-     */
     protected function assertApiAccessDenied(Client $client, string $url, string $message)
     {
         $this->request($client, $url);
         $this->assertApiResponseAccessDenied($client->getResponse(), $message);
     }
 
-    /**
-     * @param Client $client
-     * @param string $url
-     * @param string $message
-     */
     protected function assertApiResponseAccessDenied(Response $response, string $message)
     {
-        $this->assertFalse($response->isSuccessful());
-        $this->assertEquals(Response::HTTP_FORBIDDEN, $response->getStatusCode());
+        self::assertFalse($response->isSuccessful());
+        self::assertEquals(Response::HTTP_FORBIDDEN, $response->getStatusCode());
         $expected = ['code' => Response::HTTP_FORBIDDEN, 'message' => $message];
-        $this->assertEquals($expected, json_decode($response->getContent(), true));
+        self::assertEquals($expected, json_decode($response->getContent(), true));
     }
 
     /**
      * @param Response $response
      * @param string[] $failedFields
+     * @param bool $extraFields
      */
-    protected function assertApiCallValidationError(Response $response, array $failedFields)
+    protected function assertApiCallValidationError(Response $response, array $failedFields, bool $extraFields = false)
     {
-        $this->assertFalse($response->isSuccessful());
+        self::assertFalse($response->isSuccessful());
         $result = json_decode($response->getContent(), true);
 
-        $this->assertArrayHasKey('errors', $result);
-        $this->assertArrayHasKey('children', $result['errors']);
+        self::assertArrayHasKey('errors', $result);
+
+        if ($extraFields) {
+            self::assertArrayHasKey('errors', $result['errors']);
+            self::assertEquals($result['errors']['errors'][0], 'This form should not contain extra fields.');
+        }
+
+        self::assertArrayHasKey('children', $result['errors']);
         $data = $result['errors']['children'];
 
         foreach ($failedFields as $fieldName) {
-            $this->assertArrayHasKey($fieldName, $data);
-            $this->assertArrayHasKey('errors', $data[$fieldName]);
+            self::assertArrayHasKey($fieldName, $data);
+            self::assertArrayHasKey('errors', $data[$fieldName]);
         }
     }
 }

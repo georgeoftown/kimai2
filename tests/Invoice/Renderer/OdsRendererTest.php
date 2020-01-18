@@ -9,17 +9,21 @@
 
 namespace App\Tests\Invoice\Renderer;
 
+use App\Invoice\InvoiceModel;
 use App\Invoice\Renderer\OdsRenderer;
-use App\Model\InvoiceModel;
+use PHPUnit\Framework\TestCase;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 /**
  * @covers \App\Invoice\Renderer\OdsRenderer
  * @covers \App\Invoice\Renderer\AbstractRenderer
  * @covers \App\Invoice\Renderer\AbstractSpreadsheetRenderer
+ * @group integration
  */
-class OdsRendererTest extends AbstractRendererTest
+class OdsRendererTest extends TestCase
 {
+    use RendererTestTrait;
+
     public function testSupports()
     {
         $sut = $this->getAbstractRenderer(OdsRenderer::class);
@@ -31,7 +35,7 @@ class OdsRendererTest extends AbstractRendererTest
         $this->assertFalse($sut->supports($this->getInvoiceDocument('company.docx')));
         $this->assertFalse($sut->supports($this->getInvoiceDocument('export.csv')));
         $this->assertFalse($sut->supports($this->getInvoiceDocument('spreadsheet.xlsx')));
-        $this->assertTrue($sut->supports($this->getInvoiceDocument('open-spreadsheet.ods')));
+        $this->assertTrue($sut->supports($this->getInvoiceDocument('open-spreadsheet.ods', true)));
     }
 
     public function getTestModel()
@@ -48,7 +52,7 @@ class OdsRendererTest extends AbstractRendererTest
         /** @var OdsRenderer $sut */
         $sut = $this->getAbstractRenderer(OdsRenderer::class);
         $model = $this->getInvoiceModel();
-        $document = $this->getInvoiceDocument('open-spreadsheet.ods');
+        $document = $this->getInvoiceDocument('open-spreadsheet.ods', true);
         /** @var BinaryFileResponse $response */
         $response = $sut->render($document, $model);
 
@@ -62,7 +66,7 @@ class OdsRendererTest extends AbstractRendererTest
         /*
         $content = file_get_contents($file->getRealPath());
         $this->assertNotContains('${', $content);
-        $this->assertContains(',"1,947.99" ', $content);
+        $this->assertStringContainsString(',"1,947.99" ', $content);
         $this->assertEquals(6, substr_count($content, PHP_EOL));
         $this->assertEquals(5, substr_count($content, 'activity description'));
         $this->assertEquals(1, substr_count($content, ',"kevin",'));

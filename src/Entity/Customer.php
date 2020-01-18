@@ -9,14 +9,22 @@
 
 namespace App\Entity;
 
+use Doctrine\Common\Collections\ArrayCollection;
+use Doctrine\Common\Collections\Collection;
 use Doctrine\ORM\Mapping as ORM;
 use Symfony\Component\Validator\Constraints as Assert;
 
 /**
- * @ORM\Table(name="kimai2_customers")
+ * @ORM\Table(name="kimai2_customers",
+ *     indexes={
+ *          @ORM\Index(columns={"visible"})
+ *     }
+ * )
  * @ORM\Entity(repositoryClass="App\Repository\CustomerRepository")
+ *
+ * columns={"visible"}  => IDX_5A9760447AB0E859 => used in customer dropdown
  */
-class Customer
+class Customer implements EntityWithMetaFields
 {
     public const DEFAULT_CURRENCY = 'EUR';
 
@@ -32,9 +40,11 @@ class Customer
     /**
      * @var string
      *
-     * @ORM\Column(name="name", type="string", length=255, nullable=false)
+     * Do not increase length to more than 190 chars, otherwise "Index column size too large." will be triggered.
+     *
+     * @ORM\Column(name="name", type="string", length=150, nullable=false)
      * @Assert\NotBlank()
-     * @Assert\Length(min=2, max=255)
+     * @Assert\Length(min=2, max=150)
      */
     private $name;
 
@@ -42,22 +52,16 @@ class Customer
      * @var string
      *
      * @ORM\Column(name="number", type="string", length=50, nullable=true)
+     * @Assert\Length(max=50)
      */
     private $number;
 
     /**
      * @var string
      *
-     * @ORM\Column(name="comment", type="text", length=65535, nullable=true)
+     * @ORM\Column(name="comment", type="text", nullable=true)
      */
     private $comment;
-
-    /**
-     * @var Project[]
-     *
-     * @ORM\OneToMany(targetEntity="App\Entity\Project", mappedBy="customer")
-     */
-    private $projects;
 
     /**
      * @var bool
@@ -71,20 +75,30 @@ class Customer
      * @var string
      *
      * @ORM\Column(name="company", type="string", length=255, nullable=true)
+     * @Assert\Length(max=255)
      */
     private $company;
 
     /**
      * @var string
      *
+     * @ORM\Column(name="vat_id", type="string", length=50, nullable=true)
+     * @Assert\Length(max=50)
+     */
+    private $vatId;
+
+    /**
+     * @var string
+     *
      * @ORM\Column(name="contact", type="string", length=255, nullable=true)
+     * @Assert\Length(max=255)
      */
     private $contact;
 
     /**
      * @var string
      *
-     * @ORM\Column(name="address", type="text", length=65535, nullable=true)
+     * @ORM\Column(name="address", type="text", nullable=true)
      */
     private $address;
 
@@ -93,6 +107,7 @@ class Customer
      *
      * @ORM\Column(name="country", type="string", length=2, nullable=false)
      * @Assert\NotBlank()
+     * @Assert\Length(max=2)
      */
     private $country;
 
@@ -101,6 +116,7 @@ class Customer
      *
      * @ORM\Column(name="currency", type="string", length=3, nullable=false)
      * @Assert\NotBlank()
+     * @Assert\Length(max=3)
      */
     private $currency = self::DEFAULT_CURRENCY;
 
@@ -108,6 +124,7 @@ class Customer
      * @var string
      *
      * @ORM\Column(name="phone", type="string", length=255, nullable=true)
+     * @Assert\Length(max=255)
      */
     private $phone;
 
@@ -115,6 +132,7 @@ class Customer
      * @var string
      *
      * @ORM\Column(name="fax", type="string", length=255, nullable=true)
+     * @Assert\Length(max=255)
      */
     private $fax;
 
@@ -122,13 +140,17 @@ class Customer
      * @var string
      *
      * @ORM\Column(name="mobile", type="string", length=255, nullable=true)
+     * @Assert\Length(max=255)
      */
     private $mobile;
 
     /**
      * @var string
      *
+     * Limited via RFC to 254 chars
+     *
      * @ORM\Column(name="email", type="string", length=255, nullable=true)
+     * @Assert\Length(max=254)
      */
     private $email;
 
@@ -136,379 +158,334 @@ class Customer
      * @var string
      *
      * @ORM\Column(name="homepage", type="string", length=255, nullable=true)
+     * @Assert\Length(max=255)
      */
     private $homepage;
 
     /**
      * @var string
      *
-     * @ORM\Column(name="timezone", type="string", length=255, nullable=false)
+     * Length was determined by a MySQL column via "use mysql;describe time_zone_name;"
+     *
+     * @ORM\Column(name="timezone", type="string", length=64, nullable=false)
      * @Assert\NotBlank()
+     * @Assert\Length(max=64)
      */
     private $timezone;
 
     // keep the trait include exactly here, for placing the column at the correct position
     use RatesTrait;
     use ColorTrait;
+    use BudgetTrait;
 
     /**
-     * @return int
+     * @var CustomerMeta[]|Collection
+     *
+     * @ORM\OneToMany(targetEntity="App\Entity\CustomerMeta", mappedBy="customer", cascade={"persist"})
      */
-    public function getId()
+    private $meta;
+
+    /**
+     * @var Team[]|ArrayCollection
+     *
+     * @ORM\ManyToMany(targetEntity="Team", cascade={"persist"}, inversedBy="customers")
+     * @ORM\JoinTable(
+     *  name="kimai2_customers_teams",
+     *  joinColumns={
+     *      @ORM\JoinColumn(name="customer_id", referencedColumnName="id", onDelete="CASCADE")
+     *  },
+     *  inverseJoinColumns={
+     *      @ORM\JoinColumn(name="team_id", referencedColumnName="id", onDelete="CASCADE")
+     *  }
+     * )
+     */
+    private $teams;
+
+    public function __construct()
+    {
+        $this->meta = new ArrayCollection();
+        $this->teams = new ArrayCollection();
+    }
+
+    public function getId(): ?int
     {
         return $this->id;
     }
 
-    /**
-     * Set name
-     *
-     * @param string $name
-     * @return Customer
-     */
-    public function setName($name)
+    public function setName(string $name): Customer
     {
         $this->name = $name;
 
         return $this;
     }
 
-    /**
-     * Get name
-     *
-     * @return string
-     */
     public function getName(): ?string
     {
         return $this->name;
     }
 
-    /**
-     * @param string $number
-     * @return Customer
-     */
-    public function setNumber(string $number)
+    public function setNumber(?string $number): Customer
     {
         $this->number = $number;
 
         return $this;
     }
 
-    /**
-     * @return string
-     */
     public function getNumber(): ?string
     {
         return $this->number;
     }
 
-    /**
-     * Set comment
-     *
-     * @param string $comment
-     * @return Customer
-     */
-    public function setComment($comment)
+    public function setComment(?string $comment): Customer
     {
         $this->comment = $comment;
 
         return $this;
     }
 
-    /**
-     * Get comment
-     *
-     * @return string
-     */
-    public function getComment()
+    public function getComment(): ?string
     {
         return $this->comment;
     }
 
-    /**
-     * Set visible
-     *
-     * @param bool $visible
-     * @return Customer
-     */
-    public function setVisible($visible)
+    public function setVisible(bool $visible): Customer
     {
         $this->visible = $visible;
 
         return $this;
     }
 
-    /**
-     * Get visible
-     *
-     * @return bool
-     */
-    public function getVisible()
+    public function isVisible(): bool
     {
         return $this->visible;
     }
 
     /**
-     * Set company
-     *
-     * @param string $company
-     * @return Customer
+     * @deprecated since 1.4
      */
-    public function setCompany($company)
+    public function getVisible(): bool
+    {
+        return $this->visible;
+    }
+
+    public function setCompany(?string $company): Customer
     {
         $this->company = $company;
 
         return $this;
     }
 
-    /**
-     * Get company
-     *
-     * @return string
-     */
-    public function getCompany()
+    public function getCompany(): ?string
     {
         return $this->company;
     }
 
-    /**
-     * Set contact
-     *
-     * @param string $contact
-     * @return Customer
-     */
-    public function setContact($contact)
+    public function getVatId(): ?string
+    {
+        return $this->vatId;
+    }
+
+    public function setVatId(?string $vatId): Customer
+    {
+        $this->vatId = $vatId;
+
+        return $this;
+    }
+
+    public function setContact(?string $contact): Customer
     {
         $this->contact = $contact;
 
         return $this;
     }
 
-    /**
-     * Get contact
-     *
-     * @return string
-     */
-    public function getContact()
+    public function getContact(): ?string
     {
         return $this->contact;
     }
 
-    /**
-     * @param string $address
-     * @return Customer
-     */
-    public function setAddress($address)
+    public function setAddress(?string $address): Customer
     {
         $this->address = $address;
 
         return $this;
     }
 
-    /**
-     * @return string
-     */
-    public function getAddress()
+    public function getAddress(): ?string
     {
         return $this->address;
     }
 
-    /**
-     * Set country
-     *
-     * @param string $country
-     * @return Customer
-     */
-    public function setCountry($country)
+    public function setCountry(string $country): Customer
     {
         $this->country = $country;
 
         return $this;
     }
 
-    /**
-     * Get country
-     *
-     * @return string
-     */
-    public function getCountry()
+    public function getCountry(): ?string
     {
         return $this->country;
     }
 
-    /**
-     * @param string $currency
-     * @return Customer
-     */
-    public function setCurrency($currency)
+    public function setCurrency(string $currency): Customer
     {
         $this->currency = $currency;
 
         return $this;
     }
 
-    /**
-     * @return string
-     */
-    public function getCurrency()
+    public function getCurrency(): string
     {
         return $this->currency;
     }
 
-    /**
-     * Set phone
-     *
-     * @param string $phone
-     * @return Customer
-     */
-    public function setPhone($phone)
+    public function setPhone(?string $phone): Customer
     {
         $this->phone = $phone;
 
         return $this;
     }
 
-    /**
-     * Get phone
-     *
-     * @return string
-     */
-    public function getPhone()
+    public function getPhone(): ?string
     {
         return $this->phone;
     }
 
-    /**
-     * Set fax
-     *
-     * @param string $fax
-     * @return Customer
-     */
-    public function setFax($fax)
+    public function setFax(?string $fax): Customer
     {
         $this->fax = $fax;
 
         return $this;
     }
 
-    /**
-     * Get fax
-     *
-     * @return string
-     */
-    public function getFax()
+    public function getFax(): ?string
     {
         return $this->fax;
     }
 
-    /**
-     * Set mobile
-     *
-     * @param string $mobile
-     * @return Customer
-     */
-    public function setMobile($mobile)
+    public function setMobile(?string $mobile): Customer
     {
         $this->mobile = $mobile;
 
         return $this;
     }
 
-    /**
-     * Get mobile
-     *
-     * @return string
-     */
-    public function getMobile()
+    public function getMobile(): ?string
     {
         return $this->mobile;
     }
 
-    /**
-     * Set mail
-     *
-     * @param string $mail
-     * @return Customer
-     */
-    public function setEmail($mail)
+    public function setEmail(?string $mail): Customer
     {
         $this->email = $mail;
 
         return $this;
     }
 
-    /**
-     * Get mail
-     *
-     * @return string
-     */
-    public function getEmail()
+    public function getEmail(): ?string
     {
         return $this->email;
     }
 
-    /**
-     * Set homepage
-     *
-     * @param string $homepage
-     * @return Customer
-     */
-    public function setHomepage($homepage)
+    public function setHomepage(?string $homepage): Customer
     {
         $this->homepage = $homepage;
 
         return $this;
     }
 
-    /**
-     * Get homepage
-     *
-     * @return string
-     */
-    public function getHomepage()
+    public function getHomepage(): ?string
     {
         return $this->homepage;
     }
 
-    /**
-     * Set timezone
-     *
-     * @param string $timezone
-     * @return Customer
-     */
-    public function setTimezone($timezone)
+    public function setTimezone(string $timezone): Customer
     {
         $this->timezone = $timezone;
 
         return $this;
     }
 
-    /**
-     * Get timezone
-     *
-     * @return string
-     */
-    public function getTimezone()
+    public function getTimezone(): ?string
     {
         return $this->timezone;
     }
 
     /**
-     * @param Project[] $projects
-     * @return Customer
+     * @internal only here for symfony forms
+     * @return Collection|MetaTableTypeInterface[]
      */
-    public function setProjects($projects)
+    public function getMetaFields(): Collection
     {
-        $this->projects = $projects;
+        return $this->meta;
+    }
+
+    /**
+     * @return MetaTableTypeInterface[]
+     */
+    public function getVisibleMetaFields(): array
+    {
+        $all = [];
+        foreach ($this->meta as $meta) {
+            if ($meta->isVisible()) {
+                $all[] = $meta;
+            }
+        }
+
+        return $all;
+    }
+
+    public function getMetaField(string $name): ?MetaTableTypeInterface
+    {
+        foreach ($this->meta as $field) {
+            if (strtolower($field->getName()) === strtolower($name)) {
+                return $field;
+            }
+        }
+
+        return null;
+    }
+
+    public function setMetaField(MetaTableTypeInterface $meta): EntityWithMetaFields
+    {
+        if (null === ($current = $this->getMetaField($meta->getName()))) {
+            $meta->setEntity($this);
+            $this->meta->add($meta);
+
+            return $this;
+        }
+
+        $current->merge($meta);
 
         return $this;
     }
 
-    /**
-     * @return Project[]
-     */
-    public function getProjects()
+    public function addTeam(Team $team)
     {
-        return $this->projects;
+        if ($this->teams->contains($team)) {
+            return $this;
+        }
+
+        $this->teams->add($team);
+        $team->addCustomer($this);
+    }
+
+    public function removeTeam(Team $team)
+    {
+        if (!$this->teams->contains($team)) {
+            return;
+        }
+        $this->teams->removeElement($team);
+        $team->removeCustomer($this);
+    }
+
+    /**
+     * @return Collection<Team>
+     */
+    public function getTeams(): Collection
+    {
+        return $this->teams;
     }
 
     /**

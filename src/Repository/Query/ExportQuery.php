@@ -14,23 +14,32 @@ class ExportQuery extends TimesheetQuery
     /**
      * @var string
      */
-    protected $type;
-
+    private $type;
     /**
-     * @return string
+     * @var bool
      */
+    private $markAsExported = false;
+
     public function getType(): ?string
     {
         return $this->type;
     }
 
-    /**
-     * @param string $type
-     * @return ExportQuery
-     */
-    public function setType(string $type)
+    public function setType(string $type): ExportQuery
     {
         $this->type = $type;
+
+        return $this;
+    }
+
+    public function isMarkAsExported(): bool
+    {
+        return $this->markAsExported;
+    }
+
+    public function setMarkAsExported(bool $markAsExported): ExportQuery
+    {
+        $this->markAsExported = $markAsExported;
 
         return $this;
     }

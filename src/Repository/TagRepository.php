@@ -9,10 +9,46 @@
 
 namespace App\Repository;
 
+use App\Entity\Tag;
+use App\Repository\Query\TagFormTypeQuery;
 use App\Repository\Query\TagQuery;
+use Doctrine\ORM\EntityRepository;
+use Doctrine\ORM\ORMException;
+use Doctrine\ORM\QueryBuilder;
+use Pagerfanta\Adapter\DoctrineORMAdapter;
+use Pagerfanta\Pagerfanta;
 
-class TagRepository extends AbstractRepository
+class TagRepository extends EntityRepository
 {
+    /**
+     * @param Tag $tag
+     * @throws ORMException
+     * @throws \Doctrine\ORM\OptimisticLockException
+     */
+    public function saveTag(Tag $tag)
+    {
+        $entityManager = $this->getEntityManager();
+        $entityManager->persist($tag);
+        $entityManager->flush();
+    }
+
+    /**
+     * @param Tag $tag
+     * @throws ORMException
+     * @throws \Doctrine\ORM\OptimisticLockException
+     */
+    public function deleteTag(Tag $tag)
+    {
+        $entityManager = $this->getEntityManager();
+        $entityManager->remove($tag);
+        $entityManager->flush();
+    }
+
+    public function findTagByName(string $tagName): ?Tag
+    {
+        return $this->findOneBy(['name' => $tagName]);
+    }
+
     /**
      * Find ids of the given tagNames separated by comma
      * @param string $tagNames
@@ -65,7 +101,7 @@ class TagRepository extends AbstractRepository
      * - amount
      *
      * @param TagQuery $query
-     * @return array|\Doctrine\ORM\QueryBuilder|\Pagerfanta\Pagerfanta
+     * @return Pagerfanta
      */
     public function getTagCount(TagQuery $query)
     {
@@ -75,9 +111,73 @@ class TagRepository extends AbstractRepository
             ->select('tag.id, tag.name, count(timesheets.id) as amount')
             ->leftJoin('tag.timesheets', 'timesheets')
             ->addGroupBy('tag.id')
-            ->orderBy('tag.name')
+            ->addGroupBy('tag.name')
         ;
 
-        return $this->getBaseQueryResult($qb, $query);
+        $orderBy = $query->getOrderBy();
+        switch ($orderBy) {
+            case 'amount':
+                $orderBy = 'amount';
+                break;
+            default:
+                $orderBy = 'tag.' . $orderBy;
+                break;
+        }
+
+        $qb->addOrderBy($orderBy, $query->getOrder());
+
+        if ($query->hasSearchTerm()) {
+            $searchTerm = $query->getSearchTerm();
+            $searchAnd = $qb->expr()->andX();
+
+            if ($searchTerm->hasSearchTerm()) {
+                $searchAnd->add(
+                    $qb->expr()->orX(
+                        $qb->expr()->like('tag.name', ':searchTerm')
+                    )
+                );
+                $qb->setParameter('searchTerm', '%' . $searchTerm->getSearchTerm() . '%');
+            }
+
+            if ($searchAnd->count() > 0) {
+                $qb->andWhere($searchAnd);
+            }
+        }
+
+        $paginator = new Pagerfanta(new DoctrineORMAdapter($qb->getQuery(), false));
+        $paginator->setMaxPerPage($query->getPageSize());
+        $paginator->setCurrentPage($query->getPage());
+
+        return $paginator;
+    }
+
+    public function getQueryBuilderForFormType(TagFormTypeQuery $query): QueryBuilder
+    {
+        $qb = $this->createQueryBuilder('tag');
+
+        $qb->orderBy('tag.name', 'ASC');
+
+        return $qb;
+    }
+
+    /**
+     * @param Tag[] $tags
+     * @throws \Exception
+     */
+    public function multiDelete(iterable $tags): void
+    {
+        $em = $this->getEntityManager();
+        $em->beginTransaction();
+
+        try {
+            foreach ($tags as $tag) {
+                $em->remove($tag);
+            }
+            $em->flush();
+            $em->commit();
+        } catch (\Exception $ex) {
+            $em->rollback();
+            throw $ex;
+        }
     }
 }

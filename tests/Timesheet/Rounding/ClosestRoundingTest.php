@@ -7,7 +7,7 @@
  * file that was distributed with this source code.
  */
 
-namespace App\Tests\Timesheet\Calculator;
+namespace App\Tests\Timesheet\Rounding;
 
 use App\Entity\Timesheet;
 use App\Timesheet\Rounding\ClosestRounding;
@@ -31,6 +31,7 @@ class ClosestRoundingTest extends TestCase
         $record->setDuration($record->getEnd()->getTimestamp() - $record->getBegin()->getTimestamp());
 
         $sut = new ClosestRounding();
+        self::assertEquals('closest', $sut->getId());
         $sut->roundBegin($record, $roundBegin);
         $sut->roundEnd($record, $roundEnd);
         $record->setDuration($record->getEnd()->getTimestamp() - $record->getBegin()->getTimestamp());

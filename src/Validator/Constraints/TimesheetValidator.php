@@ -11,6 +11,7 @@ namespace App\Validator\Constraints;
 
 use App\Configuration\TimesheetConfiguration;
 use App\Entity\Timesheet as TimesheetEntity;
+use App\Timesheet\TrackingModeService;
 use App\Validator\Constraints\Timesheet as TimesheetConstraint;
 use Symfony\Component\Security\Core\Authorization\AuthorizationCheckerInterface;
 use Symfony\Component\Validator\Constraint;
@@ -28,19 +29,24 @@ class TimesheetValidator extends ConstraintValidator
      * @var TimesheetConfiguration
      */
     protected $configuration;
+    /**
+     * @var TrackingModeService
+     */
+    protected $trackingModeService;
 
     /**
      * @param AuthorizationCheckerInterface $auth
      * @param TimesheetConfiguration $configuration
      */
-    public function __construct(AuthorizationCheckerInterface $auth, TimesheetConfiguration $configuration)
+    public function __construct(AuthorizationCheckerInterface $auth, TimesheetConfiguration $configuration, TrackingModeService $service)
     {
         $this->auth = $auth;
         $this->configuration = $configuration;
+        $this->trackingModeService = $service;
     }
 
     /**
-     * @param TimesheetEntity $value
+     * @param TimesheetEntity|mixed $value
      * @param Constraint $constraint
      */
     public function validate($value, Constraint $constraint)
@@ -68,9 +74,16 @@ class TimesheetValidator extends ConstraintValidator
         // an entry is edited and the end date is removed (or duration deleted) would restart the record,
         // which might be disallowed for the current user
         if ($context->getViolations()->count() == 0 && null === $timesheet->getEnd()) {
+            $mode = $this->trackingModeService->getActiveMode();
+            $path = 'start';
+            if ($mode->canEditEnd()) {
+                $path = 'end';
+            } elseif ($mode->canEditDuration()) {
+                $path = 'duration';
+            }
             if (!$this->auth->isGranted('start', $timesheet)) {
                 $context->buildViolation('You are not allowed to start this timesheet record.')
-                    ->atPath($this->configuration->isDurationOnly() ? 'duration' : 'end')
+                    ->atPath($path)
                     ->setTranslationDomain('validators')
                     ->setCode(TimesheetConstraint::START_DISALLOWED)
                     ->addViolation();
@@ -106,12 +119,16 @@ class TimesheetValidator extends ConstraintValidator
                 ->addViolation();
         }
 
-        if (false === $this->configuration->isAllowFutureTimes() && time() < $timesheet->getBegin()->getTimestamp()) {
-            $context->buildViolation('The begin date cannot be in the future.')
-                ->atPath('begin')
-                ->setTranslationDomain('validators')
-                ->setCode(TimesheetConstraint::BEGIN_IN_FUTURE_ERROR)
-                ->addViolation();
+        if (false === $this->configuration->isAllowFutureTimes()) {
+            // allow configured default rounding time + 1 minute - see #1295
+            $allowedDiff = ($this->configuration->getDefaultRoundingBegin() * 60) + 60;
+            if ((time() + $allowedDiff) < $timesheet->getBegin()->getTimestamp()) {
+                $context->buildViolation('The begin date cannot be in the future.')
+                    ->atPath('begin')
+                    ->setTranslationDomain('validators')
+                    ->setCode(TimesheetConstraint::BEGIN_IN_FUTURE_ERROR)
+                    ->addViolation();
+            }
         }
     }
 
@@ -149,7 +166,9 @@ class TimesheetValidator extends ConstraintValidator
                 ->addViolation();
         }
 
-        if (null === $timesheet->getEnd() && $activity->getVisible() === false) {
+        $timesheetEnd = $timesheet->getEnd();
+
+        if (null === $timesheetEnd && !$activity->isVisible()) {
             $context->buildViolation('Cannot start a disabled activity.')
                 ->atPath('activity')
                 ->setTranslationDomain('validators')
@@ -157,7 +176,7 @@ class TimesheetValidator extends ConstraintValidator
                 ->addViolation();
         }
 
-        if (null === $timesheet->getEnd() && $project->getVisible() === false) {
+        if (null === $timesheetEnd && !$project->isVisible()) {
             $context->buildViolation('Cannot start a disabled project.')
                 ->atPath('project')
                 ->setTranslationDomain('validators')
@@ -165,12 +184,52 @@ class TimesheetValidator extends ConstraintValidator
                 ->addViolation();
         }
 
-        if (null === $timesheet->getEnd() && $project->getCustomer()->getVisible() === false) {
+        if (null === $timesheetEnd && !$project->getCustomer()->isVisible()) {
             $context->buildViolation('Cannot start a disabled customer.')
                 ->atPath('customer')
                 ->setTranslationDomain('validators')
                 ->setCode(TimesheetConstraint::DISABLED_CUSTOMER_ERROR)
                 ->addViolation();
+        }
+
+        $projectBegin = $project->getStart();
+        $projectEnd = $project->getEnd();
+
+        if (null !== $projectBegin || null !== $projectEnd) {
+            $timesheetStart = $timesheet->getBegin();
+            $timesheetEnd = $timesheet->getEnd();
+
+            if (null !== $timesheetStart) {
+                if (null !== $projectBegin && $timesheetStart->getTimestamp() < $projectBegin->getTimestamp()) {
+                    $context->buildViolation('The project has not started at that time.')
+                        ->atPath('begin')
+                        ->setTranslationDomain('validators')
+                        ->setCode(TimesheetConstraint::PROJECT_NOT_STARTED)
+                        ->addViolation();
+                } elseif (null !== $projectEnd && $timesheetStart->getTimestamp() > $projectEnd->getTimestamp()) {
+                    $context->buildViolation('The project is finished at that time.')
+                        ->atPath('begin')
+                        ->setTranslationDomain('validators')
+                        ->setCode(TimesheetConstraint::PROJECT_ALREADY_ENDED)
+                        ->addViolation();
+                }
+            }
+
+            if (null !== $timesheetEnd) {
+                if (null !== $projectEnd && $timesheetEnd->getTimestamp() > $projectEnd->getTimestamp()) {
+                    $context->buildViolation('The project is finished at that time.')
+                        ->atPath('end')
+                        ->setTranslationDomain('validators')
+                        ->setCode(TimesheetConstraint::PROJECT_ALREADY_ENDED)
+                        ->addViolation();
+                } elseif (null !== $projectBegin && $timesheetEnd->getTimestamp() < $projectBegin->getTimestamp()) {
+                    $context->buildViolation('The project has not started at that time.')
+                        ->atPath('end')
+                        ->setTranslationDomain('validators')
+                        ->setCode(TimesheetConstraint::PROJECT_NOT_STARTED)
+                        ->addViolation();
+                }
+            }
         }
     }
 }

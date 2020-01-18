@@ -4,227 +4,196 @@
 #
 # Be aware that this file is YAML format and the indentation is important.
 # Each config level needs to be indented with 4 additional spaces.
-#
 # ---------------------------------------------------------------------------------------------
 kimai:
 
-    # --------------------------------------------------------------------------------
-    # You can disable the user management functions in the authentication screens (default: true).
-    #user:
-    #    registration: false
-    #    password_reset: false
-    # --------------------------------------------------------------------------------
+# --------------------------------------------------------------------------------
+# AUTHENTICATION
+# You can disable some user management functions in the authentication screens.
+# Both settings default to "true", see https://www.kimai.org/documentation/users.html
+# --------------------------------------------------------------------------------
+#    user:
+#        registration: false
+#        password_reset: false
+# --------------------------------------------------------------------------------
 
 
-    # --------------------------------------------------------------------------------
-    # All configs related to timesheet and record management
+# --------------------------------------------------------------------------------
+# TIME-TRACKING
+# All configs related to time-tracking, timesheets and record management
+# Most settings can be configured in the System configuration screen     
+# --------------------------------------------------------------------------------
     timesheet:
 
-        # render timesheet descriptions with markdown
-        markdown_content: false
+        # Allows to render timesheet descriptions with markdown
+        # This setting can be changed through the Administration screen
+        # markdown_content: false
 
-        # The time-tracking mode that should be used (allowed values: default, duration_only)
+        # The time-tracking mode that should be used.
+        # See https://www.kimai.org/documentation/timesheet.html#tracking-modes
+        # mode: default
+
+        # The default time to pre-fill the "create timesheet" form (in some cases).
+        # This setting is only respected by some timetracking modes and not in all situations.
         #
-        # default:        display start and end time columns in timesheet view and form
-        # duration_only:  display start time and duration, https://www.kimai.org/documentation/timesheet.html#duration-only-mode
-        mode: default
+        # Accepted formats, see
+        # - https://www.php.net/manual/en/datetime.formats.php
+        # - https://www.php.net/manual/en/datetime.formats.time.php
+        # default_begin: now
 
         # Rounding rules are used to round the begin & end dates and the duration for timesheet records.
         # The "default" rule will round "begin" down and "end" up to the full minute, the "duration" will not be rounded.
         # Find out more about rounding rules at https://www.kimai.org/documentation/timesheet.html
-        rounding:
-            default:
-                days: ['monday','tuesday','wednesday','thursday','friday','saturday','sunday']
-                begin: 1
-                end: 1
-                duration: 0
-                mode: default
+        # rounding:
+        #    default:
+        #        days: ['monday','tuesday','wednesday','thursday','friday','saturday','sunday']
+        #        begin: 1
+        #        end: 1
+        #        duration: 0
+        #        mode: default
 
         # If you want to apply different hourly rates for specific weekdays, you can uncomment the "rates" configuration.
         # The "weekend" rule will add 50% to each timesheet entry that will be recorded on "saturdays" or "sundays".
-        # See documentation about rate rules: https://www.kimai.org/documentation/timesheet.html#rate-calculation
+        # See documentation at: https://www.kimai.org/documentation/timesheet.html#rate-calculation
         # rates:
         #    weekend:
         #        days: ['saturday','sunday']
         #        factor: 1.5
 
         # If you want to limit the max. active entries per user, you can do it here.
-        #
-        # The soft_limit is used as theme setting and displays a warning color if the user has at least X active recordings
-        #
+        # The soft_limit is used as theme setting and displays a warning color if the user has reached X active recordings
         # The hard_limit is used to detect how many active records are allowed per user:
-        #   By default a user can only have one active time-record. The first one is stopped when the new one starts.
-        #   When hard_limit is > 1: as soon as the limit is reached and warning is shown and the user has to stop one active entry.
-        active_entries:
-            soft_limit: 1
-            hard_limit: 3
+        # - by default a user can only have one active time-record: it is automatically stopped when a new one is started
+        # - when hard_limit is > 1 and the user is trying to start a new entry after reaching the limit, a warning is shown
+        #   and the user has to stop an active entry first
+        # active_entries:
+        #    soft_limit: 1
+        #    hard_limit: 3
 
-        # Rules that define the Timesheet validation and behaviour
-        rules:
-            # whether records in the future can be created
-            allow_future_times: true
-
-
-    # --------------------------------------------------------------------------------
-    # Invoice management
-    #invoice:
-    #    # all files in these directories will be used as invoice documents (if supported by a renderer)
-    #    documents:
-    #        - 'var/invoices/'
-    #        - 'templates/invoice/renderer/'
+        # Rules that define timesheet validation and behaviour
+        # allow_future_times: whether records in the future can be created
+        # rules:
+        #    allow_future_times: true
+# --------------------------------------------------------------------------------
 
 
-    # --------------------------------------------------------------------------------
-    # Default settings used to populate forms
-    #defaults:
-    #    customer:
-    #        timezone: Europe/Berlin
-    #        country: DE
-    #        currency: EUR
-
-    # --------------------------------------------------------------------------------
-    # Find out more about the configurable permission system at https://www.kimai.org/documentation/permissions.html
+# --------------------------------------------------------------------------------
+# PERMISSIONS
+# Find out more about the configurable permission system at:
+# https://www.kimai.org/documentation/permissions.html
+# --------------------------------------------------------------------------------
     permissions:
+        # mapping complex rule sets of single permissions to named "sets" ("set name" = [array of "permissions and sets"])
         sets:
-            # mapping complex rulesets of single permissions to named "sets" ("set name" = [array of "permissions"])
-            ACTIVITIES: [view_activity,create_activity,edit_activity,delete_activity]
-            PROJECTS: [view_project,create_project,edit_project,delete_project]
-            CUSTOMERS: [view_customer,create_customer,edit_customer,delete_customer]
-            INVOICE: [view_invoice,create_invoice]
-            INVOICE_TEMPLATE: [view_invoice_template,create_invoice_template,edit_invoice_template,delete_invoice_template]
-            TIMESHEET: [view_own_timesheet,start_own_timesheet,stop_own_timesheet,create_own_timesheet,edit_own_timesheet,export_own_timesheet,delete_own_timesheet]
-            TIMESHEET_OTHER: [view_other_timesheet,start_other_timesheet,stop_other_timesheet,create_other_timesheet,edit_other_timesheet,export_other_timesheet,delete_other_timesheet]
-            PROFILE: [view_own_profile,edit_own_profile,password_own_profile,preferences_own_profile,api-token_own_profile]
-            PROFILE_OTHER: [view_other_profile,edit_other_profile,delete_other_profile,password_other_profile,roles_other_profile,preferences_other_profile,api-token_other_profile]
-            TAGS: [view_tag,delete_tag]
-            USER: [view_user,create_user,delete_user]
-            RATE: [view_rate_own_timesheet,edit_rate_own_timesheet]
-            RATE_OTHER: [view_rate_other_timesheet,edit_rate_other_timesheet]
-            EXPORT: [view_export,create_export,edit_export_own_timesheet,edit_export_other_timesheet]
+            ACTIVITIES: ['view_activity','create_activity','edit_activity','budget_activity','delete_activity']
+            ACTIVITIES_TEAMLEAD: ['view_activity','create_activity','edit_teamlead_activity','budget_teamlead_activity']
+            PROJECTS: ['view_project','create_project','edit_project','budget_project','delete_project','permissions_project','comments_project','details_project']
+            PROJECTS_ALL_TEAMLEAD: ['view_teamlead_project','edit_teamlead_project','budget_teamlead_project','permissions_teamlead_project','comments_teamlead_project','details_teamlead_project']
+            PROJECTS_ALL_TEAM: ['view_team_project','edit_team_project','budget_team_project','comments_team_project','details_team_project']
+            PROJECTS_TEAMLEAD: ['view_teamlead_project','edit_teamlead_project','budget_teamlead_project','comments_teamlead_project','details_teamlead_project']
+            CUSTOMERS: ['view_customer','create_customer','edit_customer','budget_customer','delete_customer','permissions_customer','comments_customer','details_customer']
+            CUSTOMERS_ALL_TEAMLEAD: ['view_teamlead_customer','edit_teamlead_customer','budget_teamlead_customer','permissions_teamlead_customer','comments_teamlead_customer','details_teamlead_customer']
+            CUSTOMERS_ALL_TEAM: ['view_team_customer','edit_team_customer','budget_team_customer','comments_team_customer','details_team_customer']
+            CUSTOMERS_TEAMLEAD: ['view_teamlead_customer','edit_teamlead_customer','budget_teamlead_customer','comments_teamlead_customer','details_teamlead_customer']
+            INVOICE: ['view_invoice','create_invoice']
+            INVOICE_TEMPLATE: ['manage_invoice_template']
+            TIMESHEET: ['view_own_timesheet','start_own_timesheet','stop_own_timesheet','create_own_timesheet','edit_own_timesheet','export_own_timesheet','delete_own_timesheet']
+            TIMESHEET_OTHER: ['view_other_timesheet','start_other_timesheet','stop_other_timesheet','create_other_timesheet','edit_other_timesheet','export_other_timesheet','delete_other_timesheet']
+            PROFILE: ['view_own_profile','edit_own_profile','password_own_profile','preferences_own_profile','api-token_own_profile']
+            PROFILE_OTHER: ['view_other_profile','edit_other_profile','password_other_profile','roles_other_profile','preferences_other_profile','api-token_other_profile','teams_other_profile']
+            TAGS: ['view_tag','manage_tag','delete_tag']
+            USER: ['view_user','create_user','delete_user','role_permissions']
+            RATE: ['view_rate_own_timesheet','edit_rate_own_timesheet']
+            RATE_OTHER: ['view_rate_other_timesheet','edit_rate_other_timesheet']
+            EXPORT: ['create_export','edit_export_own_timesheet','edit_export_other_timesheet']
+            TEAMS: ['view_team','create_team','edit_team','delete_team']
+            # some single default definitions for roles 
+            SINGLE_USER: ['view_team_member','budget_team_project']
+            SINGLE_TEAMLEAD: ['view_rate_own_timesheet','view_rate_other_timesheet','hourly-rate_own_profile','view_team_member']
+            SINGLE_ADMIN: ['hourly-rate_own_profile','edit_exported_timesheet','teams_own_profile','view_team_member']
+            SINGLE_SUPER_ADMIN: ['hourly-rate_own_profile','hourly-rate_other_profile','roles_own_profile','system_information','system_configuration','plugins','edit_exported_timesheet','teams_own_profile','view_team_member']
+            # link above sets to one complete set for each user role
+            ROLE_USER: ['@TIMESHEET','@PROFILE','@SINGLE_USER']
+            ROLE_TEAMLEAD: ['@ACTIVITIES_TEAMLEAD','@PROJECTS_TEAMLEAD','@CUSTOMERS_TEAMLEAD','@TIMESHEET_OTHER','@INVOICE','@TIMESHEET','@PROFILE','@EXPORT','@TAGS','@SINGLE_TEAMLEAD']
+            ROLE_ADMIN: ['@ACTIVITIES','@PROJECTS','@CUSTOMERS','@INVOICE','@INVOICE_TEMPLATE','@TIMESHEET','@TIMESHEET_OTHER','@PROFILE','@TEAMS','@RATE','@RATE_OTHER','@EXPORT','@TAGS','@SINGLE_ADMIN']
+            ROLE_SUPER_ADMIN: ['@ACTIVITIES','@PROJECTS','@CUSTOMERS','@INVOICE','@INVOICE_TEMPLATE','@TIMESHEET','@TIMESHEET_OTHER','@PROFILE','@PROFILE_OTHER','@USER','@TEAMS','@RATE','@RATE_OTHER','@EXPORT','@TAGS','@SINGLE_SUPER_ADMIN']
+        # mapping "sets" or permissions to user roles ("role name" = [array of "set names"])
         maps:
-            # mapping "sets" or permissions to user roles ("role name" = [array of "set names"])
-            ROLE_USER: [TIMESHEET,PROFILE]
-            ROLE_TEAMLEAD: [INVOICE,TIMESHEET,TIMESHEET_OTHER,PROFILE,EXPORT,TAGS]
-            ROLE_ADMIN: [ACTIVITIES,PROJECTS,CUSTOMERS,INVOICE,INVOICE_TEMPLATE,TIMESHEET,TIMESHEET_OTHER,PROFILE,RATE,RATE_OTHER,EXPORT,TAGS]
-            ROLE_SUPER_ADMIN: [ACTIVITIES,PROJECTS,CUSTOMERS,INVOICE,INVOICE_TEMPLATE,TIMESHEET,TIMESHEET_OTHER,PROFILE,PROFILE_OTHER,USER,RATE,RATE_OTHER,EXPORT,TAGS]
+            ROLE_USER: ['ROLE_USER']
+            ROLE_TEAMLEAD: ['ROLE_TEAMLEAD']
+            ROLE_ADMIN: ['ROLE_ADMIN']
+            ROLE_SUPER_ADMIN: ['ROLE_SUPER_ADMIN']
+            # only here to register the (partially) unused permissions in the UI
+            ROLE_FAKE: ['CUSTOMERS_ALL_TEAMLEAD','CUSTOMERS_ALL_TEAM','PROJECTS_ALL_TEAMLEAD','PROJECTS_ALL_TEAM']
+        # add or remove single permissions
         roles:
-            # adding single permissions to user roles, extending the definition from "sets" ("role name" = [array of "permissions"])
             ROLE_USER: []
-            ROLE_TEAMLEAD: [view_invoice_template,create_invoice_template,edit_invoice_template,view_rate_own_timesheet,view_rate_other_timesheet,hourly-rate_own_profile]
-            ROLE_ADMIN: [hourly-rate_own_profile]
-            ROLE_SUPER_ADMIN: [hourly-rate_own_profile,hourly-rate_other_profile,delete_own_profile,roles_own_profile,system_information,system_actions,system_configuration,plugins]
+            ROLE_TEAMLEAD: []
+            ROLE_ADMIN: []
+            ROLE_SUPER_ADMIN: []
+# --------------------------------------------------------------------------------
 
-    # --------------------------------------------------------------------------------
-    # Language specific settings, like the date formats
-    languages:
-        de:
-            date_time_type: 'dd.MM.yyyy HH:mm'
-            date_type: 'dd.MM.yyyy'
-            date: 'd.m.Y'
-            date_time: 'd.m. H:i'
-            duration: '%%h:%%m h'
-        en:
-            date_time_type: 'yyyy-MM-dd HH:mm'
-            date_type: 'yyyy-MM-dd'
-            date: 'Y-m-d'
-            date_time: 'm-d H:i'
-            duration: '%%h:%%m h'
-        pt_BR:
-            date_time_type: 'dd-MM-yyyy HH:mm'
-            date_type: 'dd-MM-yyyy'
-            date: 'd-m-Y'
-            date_time: 'd-m H:i'
-            duration: '%%h:%%m h'
-        it:
-            date_time_type: 'dd.MM.yyyy HH:mm'
-            date_type: 'dd.MM.yyyy'
-            date: 'd.m.Y'
-            date_time: 'd.m. H:i'
-            duration: '%%h:%%m h'
-        fr:
-            date_time_type: 'dd/MM/yyyy HH:mm'
-            date_type: 'dd/MM/yyyy'
-            date: 'd/m/Y'
-            date_time: 'd/m H:i'
-            duration: '%%h h %%m'
-        es:
-            date_time_type: 'dd.MM.yyyy HH:mm'
-            date_type: 'dd.MM.yyyy'
-            date: 'd.m.Y'
-            date_time: 'd.m. H:i'
-            duration: '%%h:%%m h'
-        ru:
-            date_time_type: 'dd.MM.yyyy HH:mm'
-            date_type: 'dd.MM.yyyy'
-            date: 'd.m.Y'
-            date_time: 'd.m. H:i'
-            duration: '%%h:%%m h'
-        ar:
-            date_time_type: 'yyyy-MM-dd HH:mm'
-            date_type: 'yyyy-MM-dd'
-            date: 'Y-m-d'
-            date_time: 'm-d H:i'
-            duration: '%%h:%%m h'
-        hu:
-            date_time_type: 'yyyy.MM.dd. HH:mm'
-            date_type: 'yyyy.MM.dd.'
-            date: 'Y.m.d.'
-            date_time: 'm.d. H:i'
-            duration: '%%h:%%m h'
-        sv:
-            date_time_type: 'yyyy-MM-dd HH:mm'
-            date_type: 'yyyy-MM-dd'
-            date: 'Y-m-d'
-            date_time: 'm-d H:i'
-            duration: '%%h:%%m tim'
-        ja:
-            date_time_type: 'yyyy-MM-dd HH:mm'
-            date_type: 'yyyy-MM-dd'
-            date: 'Y-m-d'
-            date_time: 'm-d H:i'
-            duration: '%%h:%%m tim'
 
-    # --------------------------------------------------------------------------------
-    # timesheet calendar configuration
-    calendar:
-        week_numbers: true
-        day_limit: 4
-        businessHours:
-            days: [1, 2, 3, 4, 5]
-            begin: '08:00'
-            end: '20:00'
+# --------------------------------------------------------------------------------
+# CALENDAR Configuration
+# See documentation at https://www.kimai.org/documentation/calendar.html
+# --------------------------------------------------------------------------------
+#    calendar:
+#        week_numbers: true
+#        weekends: true
+#        day_limit: 4
+#        slot_duration: '00:30:00'
+#        businessHours:
+#            days: [1, 2, 3, 4, 5]
+#            begin: '08:00'
+#            end: '18:00'
+#        visibleHours:
+#            begin: '00:00'
+#            end: '24:00'
+#
+#        # You can configure unlimited google calendars to display events for your company (e.g. holidays)
+#        google:
+#            api_key: 'your-restricted-google-api-key'
+#            sources:
+#                holidays:
+#                    id: 'de.german#holiday@group.v.calendar.google.com'
+#                    color: '#ccc'
+# --------------------------------------------------------------------------------
 
-        # You can configure unlimited google calendars to display events for your company (e.g. holidays)
-        # Find out more about calendar integration at https://www.kimai.org/documentation/calendar.html
-        # google:
-        #     api_key: 'your-restricted-google-api-key'
-        #     sources:
-        #         holidays:
-        #             id: 'de.german#holiday@group.v.calendar.google.com'
-        #             color: '#ccc'
 
-    # --------------------------------------------------------------------------------
-    # Theme related settings, will be available as twig globals at "kimai_context.*".
-    # See documentation at https://www.kimai.org/documentation/theme.html
-    #theme:
-        # BETA test: If you set this to 'selectpicker' the customer/project/activity select boxes will be transformed
-        # into a searchable and javascript enhanced input type
-        #select_type: ~
+# --------------------------------------------------------------------------------
+# INVOICES
+# --------------------------------------------------------------------------------
+#    invoice:
+#        # all files in these directories will be used as invoice documents (if supported by a renderer)
+#        documents:
+#            - 'var/invoices/'
+#            - 'templates/invoice/renderer/'
+# --------------------------------------------------------------------------------
 
-    # --------------------------------------------------------------------------------
-    # Dashboard widget sections.
-    # See documentation at https://www.kimai.org/documentation/dashboard.html
+
+# --------------------------------------------------------------------------------
+# DASHBOARD
+# Using the configurable widget sections.
+# See documentation at https://www.kimai.org/documentation/dashboard.html
+# --------------------------------------------------------------------------------
     dashboard:
         user_duration:
-            title: dashboard.you
+            title: stats.yourWorkingHours
             order: 10
-            permission: ROLE_USER
-            widgets: [userDurationToday, userDurationWeek, userDurationMonth, userDurationYear]
+            permission: view_own_timesheet
+            type: '\App\Widget\Type\CompoundChart'
+            widgets: [DailyWorkingTimeChart, userDurationToday, userDurationWeek, userDurationMonth, userDurationYear]
         user_rates:
             title: ~
             order: 20
-            permission: ROLE_USER
+            permission: view_rate_own_timesheet
             widgets: [userAmountToday, userAmountWeek, userAmountMonth, userAmountYear]
+        user_teams:
+            title: ~
+            order: 15
+            permission: ROLE_USER
+            widgets: [UserTeams, UserTeamProjects]
         duration:
             title: dashboard.all
             order: 30
@@ -238,40 +207,99 @@ kimai:
         rates:
             title: ~
             order: 50
-            permission: ROLE_ADMIN
+            permission: view_rate_other_timesheet
             widgets: [amountToday, amountWeek, amountMonth, amountYear]
+# --------------------------------------------------------------------------------
 
-    # --------------------------------------------------------------------------------
-    # Find out more about dashboard widgets at https://www.kimai.org/documentation/dashboard.html
-    widgets:
-        userDurationToday: { title: stats.durationToday, query: duration, user: true, begin: '00:00:00', end: '23:59:59', icon: duration, color: green }
-        userDurationWeek: { title: stats.durationWeek, query: duration, user: true, begin: 'monday this week 00:00:00', end: 'sunday this week 23:59:59', icon: duration, color: blue }
-        userDurationMonth: { title: stats.durationMonth, query: duration, user: true, begin: 'first day of this month 00:00:00', end: 'last day of this month 23:59:59', icon: duration, color: purple }
-        userDurationYear: { title: stats.durationYear, query: duration, user: true, begin: '01 january this year 00:00:00', end: '31 december this year 23:59:59', icon: duration, color: yellow }
-        userDurationTotal: { title: stats.durationTotal, query: duration, user: true, icon: duration, color: red }
-        userAmountToday: { title: stats.amountToday, query: rate, user: true, begin: '00:00:00', end: '23:59:59', icon: money, color: green }
-        userAmountWeek: { title: stats.amountWeek, query: rate, user: true, begin: 'monday this week 00:00:00', end: 'sunday this week 23:59:59', icon: money, color: blue }
-        userAmountMonth: { title: stats.amountMonth, query: rate, user: true, begin: 'first day of this month 00:00:00', end: 'last day of this month 23:59:59', icon: money, color: purple }
-        userAmountYear: { title: stats.amountYear, query: rate, user: true, begin: '01 january this year 00:00:00', end: '31 december this year 23:59:59', icon: money, color: yellow }
-        userAmountTotal: { title: stats.amountTotal, query: rate, user: true, icon: money, color: red }
-        durationToday: { title: stats.durationToday, query: duration, begin: '00:00:00', end: '23:59:59', icon: duration, color: green }
-        durationWeek: { title: stats.durationWeek, query: duration, begin: 'monday this week 00:00:00', end: 'sunday this week 23:59:59', icon: duration, color: blue }
-        durationMonth: { title: stats.durationMonth, query: duration, begin: 'first day of this month 00:00:00', end: 'last day of this month 23:59:59', icon: duration, color: purple }
-        durationYear: { title: stats.durationYear, query: duration, begin: '01 january this year 00:00:00', end: '31 december this year 23:59:59', icon: duration, color: yellow }
-        durationTotal: { title: stats.durationTotal, query: duration, icon: duration, color: red }
-        amountToday: { title: stats.amountToday, query: rate, begin: '00:00:00', end: '23:59:59', icon: money, color: green }
-        amountWeek: { title: stats.amountWeek, query: rate, begin: 'monday this week 00:00:00', end: 'sunday this week 23:59:59', icon: money, color: blue }
-        amountMonth: { title: stats.amountMonth, query: rate, begin: 'first day of this month 00:00:00', end: 'last day of this month 23:59:59', icon: money, color: purple }
-        amountYear: { title: stats.amountYear, query: rate, begin: '01 january this year 00:00:00', end: '31 december this year 23:59:59', icon: money, color: yellow }
-        amountTotal: { title: stats.amountTotal, query: rate, icon: money, color: red }
-        activeUsersToday: { title: stats.userActiveToday, query: users, begin: '00:00:00', end: '23:59:59', icon: user, color: green }
-        activeUsersWeek: { title: stats.userActiveWeek, query: users, begin: 'monday this week 00:00:00', end: 'sunday this week 23:59:59', icon: user, color: blue }
-        activeUsersMonth: { title: stats.userActiveMonth, query: users, begin: 'first day of this month 00:00:00', end: 'last day of this month 23:59:59', icon: user, color: purple }
-        activeUsersYear: { title: stats.userActiveYear, query: users, begin: '01 january this year 00:00:00', end: '31 december this year 23:59:59', icon: user, color: yellow }
-        activeUsersTotal: { title: stats.userActiveTotal, query: users, icon: user, color: red }
-        activeRecordings: { title: stats.activeRecordings, query: active, icon: duration, color: red }
 
-    # --------------------------------------------------------------------------------
-    # Storage directories
+# --------------------------------------------------------------------------------
+# LANGUAGES
+# Locale specific settings, like date formats
+# --------------------------------------------------------------------------------
+    languages:
+        cs:
+            date_time_type: 'dd.MM.yyyy HH:mm'
+            date_type: 'dd.MM.yyyy'
+            date: 'd.m.Y'
+            date_time: 'd.m H:i'
+        da:
+            date_time_type: 'dd.MM.yyyy HH:mm'
+            date_type: 'dd.MM.yyyy'
+            date: 'd.m.Y'
+            date_time: 'd.m. H:i'
+        de:
+            date_time_type: 'dd.MM.yyyy HH:mm'
+            date_type: 'dd.MM.yyyy'
+            date: 'd.m.Y'
+            date_time: 'd.m. H:i'
+        de_CH:
+            date_time_type: 'dd.MM.yyyy HH:mm'
+            date_type: 'dd.MM.yyyy'
+            date: 'd.m.Y'
+            date_time: 'd.m. H:i'
+        en:
+            date_time_type: 'yyyy-MM-dd HH:mm'
+            date_type: 'yyyy-MM-dd'
+            date: 'Y-m-d'
+            date_time: 'm-d H:i'
+            duration: '%%h:%%m h'
+        es:
+            date_time_type: 'dd.MM.yyyy HH:mm'
+            date_type: 'dd.MM.yyyy'
+            date: 'd.m.Y'
+            date_time: 'd.m. H:i'
+        eu:
+            date_time_type: 'yyyy-MM-dd HH:mm'
+            date_type: 'yyyy-MM-dd'
+            date: 'Y-m-d'
+            date_time: 'm-d H:i'
+            duration: '%%h:%%m h'
+        fr:
+            date_time_type: 'dd/MM/yyyy HH:mm'
+            date_type: 'dd/MM/yyyy'
+            date: 'd/m/Y'
+            date_time: 'd/m H:i'
+            duration: '%%h h %%m'
+        hu:
+            date_time_type: 'yyyy.MM.dd. HH:mm'
+            date_type: 'yyyy.MM.dd.'
+            date: 'Y.m.d.'
+            date_time: 'm.d. H:i'
+        it:
+            date_time_type: 'dd.MM.yyyy HH:mm'
+            date_type: 'dd.MM.yyyy'
+            date: 'd.m.Y'
+            date_time: 'd.m. H:i'
+        nl:
+            date_time_type: 'dd.MM.yyyy HH:mm'
+            date_type: 'dd.MM.yyyy'
+            date: 'd.m.Y'
+            date_time: 'd.m. H:i'
+            duration: '%%hu%%m'
+        pt_BR:
+            date_time_type: 'dd-MM-yyyy HH:mm'
+            date_type: 'dd-MM-yyyy'
+            date: 'd-m-Y'
+            date_time: 'd-m H:i'
+        ru:
+            date_time_type: 'dd.MM.yyyy HH:mm'
+            date_type: 'dd.MM.yyyy'
+            date: 'd.m.Y'
+            date_time: 'd.m. H:i'
+        sk:
+            date_time_type: 'dd. MM. yyyy HH:mm'
+            date_type: 'dd. MM. yyyy'
+            date: 'd. m. Y'
+            date_time: 'd. m.  H:i'
+        sv:
+            duration: '%%h:%%m tim'
+# --------------------------------------------------------------------------------
+
+
+# --------------------------------------------------------------------------------
+# STORAGE
+# If you want to use directories outside the Kimai directory, change these
+# --------------------------------------------------------------------------------
     data_dir: '%kernel.project_dir%/var/data'
     plugin_dir: '%kernel.project_dir%/var/plugins'
+# --------------------------------------------------------------------------------

@@ -9,8 +9,11 @@
 
 namespace App\Form\Type;
 
+use App\Entity\User;
+use App\Security\RoleService;
 use Symfony\Component\Form\AbstractType;
 use Symfony\Component\Form\Extension\Core\Type\ChoiceType;
+use Symfony\Component\OptionsResolver\Options;
 use Symfony\Component\OptionsResolver\OptionsResolver;
 
 /**
@@ -19,15 +22,11 @@ use Symfony\Component\OptionsResolver\OptionsResolver;
 class UserRoleType extends AbstractType
 {
     /**
-     * @var string[]
+     * @var RoleService
      */
-    protected $roles = [];
+    private $roles;
 
-    /**
-     * UserRolesType constructor.
-     * @param string[] $roles
-     */
-    public function __construct(array $roles = [])
+    public function __construct(RoleService $roles)
     {
         $this->roles = $roles;
     }
@@ -37,19 +36,23 @@ class UserRoleType extends AbstractType
      */
     public function configureOptions(OptionsResolver $resolver)
     {
-        $roles = [];
-        /* @var string[] $value */
-        foreach ($this->roles as $key => $value) {
-            $roles[$key] = $key;
-            foreach ($value as $value2) {
-                $roles[$value2] = $value2;
-            }
-        }
-
         $resolver->setDefaults([
             'label' => 'label.roles',
-            'choices' => $roles,
+            'include_default' => false,
         ]);
+
+        $resolver->setDefault('choices', function (Options $options) {
+            $roles = [];
+            foreach ($this->roles->getAvailableNames() as $name) {
+                $roles[$name] = strtoupper($name);
+            }
+
+            if ($options['include_default'] !== true && isset($roles[User::DEFAULT_ROLE])) {
+                unset($roles[User::DEFAULT_ROLE]);
+            }
+
+            return $roles;
+        });
     }
 
     /**

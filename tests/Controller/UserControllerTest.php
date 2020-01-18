@@ -14,7 +14,6 @@ use App\Entity\User;
 use App\Tests\DataFixtures\TimesheetFixtures;
 
 /**
- * @coversDefaultClass \App\Controller\UserController
  * @group integration
  */
 class UserControllerTest extends ControllerBaseTest
@@ -30,6 +29,35 @@ class UserControllerTest extends ControllerBaseTest
         $client = $this->getClientForAuthenticatedUser(User::ROLE_SUPER_ADMIN);
         $this->assertAccessIsGranted($client, '/admin/user/');
         $this->assertHasDataTable($client);
+        $this->assertDataTableRowCount($client, 'datatable_user_admin', 7);
+        $this->assertPageActions($client, [
+            'search search-toggle visible-xs-inline' => '#',
+            'visibility' => '#',
+            'permissions' => $this->createUrl('/admin/permissions'),
+            'create' => $this->createUrl('/admin/user/create'),
+            'help' => 'https://www.kimai.org/documentation/users.html'
+        ]);
+    }
+
+    public function testIndexActionWithSearchTermQuery()
+    {
+        $client = $this->getClientForAuthenticatedUser(User::ROLE_SUPER_ADMIN);
+
+        $this->request($client, '/admin/user/');
+        $this->assertTrue($client->getResponse()->isSuccessful());
+
+        $form = $client->getCrawler()->filter('form.header-search')->form();
+        $client->submit($form, [
+            'searchTerm' => 'hourly_rate:35 tony',
+            'role' => 'ROLE_TEAMLEAD',
+            'visibility' => 1,
+            'pageSize' => 50,
+            'page' => 1,
+        ]);
+
+        $this->assertTrue($client->getResponse()->isSuccessful());
+        $this->assertHasDataTable($client);
+        $this->assertDataTableRowCount($client, 'datatable_user_admin', 1);
     }
 
     public function testCreateAction()
@@ -39,7 +67,7 @@ class UserControllerTest extends ControllerBaseTest
         $this->assertAccessIsGranted($client, '/admin/user/create');
         $form = $client->getCrawler()->filter('form[name=user_create]')->form();
         $this->assertTrue($form->has('user_create[create_more]'));
-        $this->assertNull($form->get('user_create[create_more]')->getValue());
+        $this->assertFalse($form->get('user_create[create_more]')->hasValue());
         $client->submit($form, [
             'user_create' => [
                 'username' => $username,
@@ -52,11 +80,12 @@ class UserControllerTest extends ControllerBaseTest
         $this->assertIsRedirect($client, $this->createUrl('/profile/' . urlencode($username) . '/edit'));
         $client->followRedirect();
 
-        $expectedTabs = ['#settings', '#password', '#api-token', '#roles'];
+        $expectedTabs = ['#settings', '#password', '#api-token', '#teams', '#roles'];
 
         $tabs = $client->getCrawler()->filter('div.nav-tabs-custom ul.nav-tabs li');
         $this->assertEquals(count($expectedTabs), $tabs->count());
         $foundTabs = [];
+        /** @var \DOMElement $tab */
         foreach ($tabs->filter('a') as $tab) {
             $foundTabs[] = $tab->getAttribute('href');
         }
@@ -85,6 +114,7 @@ class UserControllerTest extends ControllerBaseTest
         $this->assertTrue($client->getResponse()->isSuccessful());
         $form = $client->getCrawler()->filter('form[name=user_create]')->form();
         $this->assertTrue($form->has('user_create[create_more]'));
+        $this->assertTrue($form->get('user_create[create_more]')->hasValue());
         $this->assertEquals(1, $form->get('user_create[create_more]')->getValue());
     }
 
@@ -135,8 +165,8 @@ class UserControllerTest extends ControllerBaseTest
 
         // SQLIte does not necessarly support onCascade delete, so these timesheet will stay after deletion
         // $em->clear();
-        // $timesheets = $em->getRepository(Timesheet::class)->findAll();
-        // $this->assertEquals(0, count($timesheets));
+        // $timesheets = $em->getRepository(Timesheet::class)->count([]);
+        // $this->assertEquals(0, $timesheets);
 
         $this->request($client, '/admin/user/' . $user->getId() . '/edit');
         $this->assertFalse($client->getResponse()->isSuccessful());

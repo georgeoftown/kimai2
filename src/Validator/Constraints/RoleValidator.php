@@ -9,7 +9,7 @@
 
 namespace App\Validator\Constraints;
 
-use App\Entity\User;
+use App\Security\RoleService;
 use Symfony\Component\Validator\Constraint;
 use Symfony\Component\Validator\ConstraintValidator;
 use Symfony\Component\Validator\Exception\UnexpectedTypeException;
@@ -17,14 +17,14 @@ use Symfony\Component\Validator\Exception\UnexpectedTypeException;
 class RoleValidator extends ConstraintValidator
 {
     /**
-     * @var string[]
+     * @var RoleService
      */
-    protected $allowedRoles = [
-        User::ROLE_USER,
-        User::ROLE_TEAMLEAD,
-        User::ROLE_ADMIN,
-        User::ROLE_SUPER_ADMIN
-    ];
+    private $service;
+
+    public function __construct(RoleService $service)
+    {
+        $this->service = $service;
+    }
 
     /**
      * {@inheritdoc}
@@ -41,8 +41,11 @@ class RoleValidator extends ConstraintValidator
             $roles = [$roles];
         }
 
+        // the fos user entity uppercases the roles by default
+        $allowedRoles = array_map('strtoupper', $this->service->getAvailableNames());
+
         foreach ($roles as $role) {
-            if (!is_string($role) || !in_array($role, $this->allowedRoles)) {
+            if (!is_string($role) || !in_array($role, $allowedRoles)) {
                 $this->context->buildViolation($constraint->message)
                     ->setParameter('{{ value }}', $this->formatValue($role))
                     ->setCode(Role::ROLE_ERROR)

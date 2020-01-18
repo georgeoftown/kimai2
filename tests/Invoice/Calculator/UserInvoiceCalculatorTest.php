@@ -16,11 +16,13 @@ use App\Entity\Project;
 use App\Entity\Timesheet;
 use App\Entity\User;
 use App\Invoice\Calculator\UserInvoiceCalculator;
-use App\Model\InvoiceModel;
+use App\Invoice\InvoiceModel;
 use App\Repository\Query\InvoiceQuery;
+use App\Tests\Invoice\DebugFormatter;
 
 /**
  * @covers \App\Invoice\Calculator\UserInvoiceCalculator
+ * @covers \App\Invoice\Calculator\AbstractMergedCalculator
  * @covers \App\Invoice\Calculator\AbstractCalculator
  */
 class UserInvoiceCalculatorTest extends AbstractCalculatorTest
@@ -39,11 +41,14 @@ class UserInvoiceCalculatorTest extends AbstractCalculatorTest
         $activity = new Activity();
         $activity->setName('activity description');
 
-        $user1 = $this->getMockBuilder(User::class)->setMethods(['getId'])->disableOriginalConstructor()->getMock();
+        $user1 = $this->getMockBuilder(User::class)->onlyMethods(['getId'])->disableOriginalConstructor()->getMock();
         $user1->method('getId')->willReturn(1);
 
-        $user2 = $this->getMockBuilder(User::class)->setMethods(['getId'])->disableOriginalConstructor()->getMock();
+        $user2 = $this->getMockBuilder(User::class)->onlyMethods(['getId'])->disableOriginalConstructor()->getMock();
         $user2->method('getId')->willReturn(2);
+
+        $user3 = $this->getMockBuilder(User::class)->onlyMethods(['getId'])->disableOriginalConstructor()->getMock();
+        $user3->method('getId')->willReturn(3);
 
         $timesheet = new Timesheet();
         $timesheet
@@ -91,7 +96,7 @@ class UserInvoiceCalculatorTest extends AbstractCalculatorTest
             ->setEnd(new \DateTime())
             ->setDuration(400)
             ->setRate(84)
-            ->setUser(new User())
+            ->setUser($user3)
             ->setActivity($activity)
             ->setProject((new Project())->setName('bar'));
 
@@ -100,7 +105,7 @@ class UserInvoiceCalculatorTest extends AbstractCalculatorTest
         $query = new InvoiceQuery();
         $query->setActivity($activity);
 
-        $model = new InvoiceModel();
+        $model = new InvoiceModel(new DebugFormatter());
         $model->setCustomer($customer);
         $model->setTemplate($template);
         $model->setEntries($entries);
@@ -126,15 +131,5 @@ class UserInvoiceCalculatorTest extends AbstractCalculatorTest
     public function testDescriptionByTimesheet()
     {
         $this->assertDescription(new UserInvoiceCalculator(), false, false);
-    }
-
-    public function testDescriptionByActivity()
-    {
-        $this->assertDescription(new UserInvoiceCalculator(), false, true);
-    }
-
-    public function testDescriptionByProject()
-    {
-        $this->assertDescription(new UserInvoiceCalculator(), true, false);
     }
 }

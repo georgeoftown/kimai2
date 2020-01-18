@@ -9,9 +9,12 @@
 
 namespace App\DependencyInjection;
 
-use App\Model\DashboardSection;
-use App\Model\Widget;
+use App\Entity\Customer;
+use App\Entity\User;
 use App\Timesheet\Rounding\RoundingInterface;
+use App\Widget\Type\CompoundRow;
+use App\Widget\Type\Counter;
+use Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition;
 use Symfony\Component\Config\Definition\Builder\TreeBuilder;
 use Symfony\Component\Config\Definition\ConfigurationInterface;
 
@@ -28,9 +31,10 @@ class Configuration implements ConfigurationInterface
     public function getConfigTreeBuilder()
     {
         $treeBuilder = new TreeBuilder('kimai');
-        $rootNode = $treeBuilder->getRootNode();
+        /** @var ArrayNodeDefinition $node */
+        $node = $treeBuilder->getRootNode();
 
-        $rootNode
+        $node
             ->children()
                 ->scalarNode('data_dir')
                     ->isRequired()
@@ -56,10 +60,12 @@ class Configuration implements ConfigurationInterface
                 ->append($this->getLanguagesNode())
                 ->append($this->getCalendarNode())
                 ->append($this->getThemeNode())
+                ->append($this->getIndustryNode())
                 ->append($this->getDashboardNode())
                 ->append($this->getWidgetsNode())
                 ->append($this->getDefaultsNode())
                 ->append($this->getPermissionsNode())
+                ->append($this->getLdapNode())
             ->end()
         ->end();
 
@@ -69,21 +75,19 @@ class Configuration implements ConfigurationInterface
     protected function getTimesheetNode()
     {
         $builder = new TreeBuilder('timesheet');
+        /** @var ArrayNodeDefinition $node */
         $node = $builder->getRootNode();
 
         $node
             ->children()
+                ->scalarNode('default_begin')
+                    ->defaultValue('now')
+                ->end()
                 ->booleanNode('duration_only')
                     ->setDeprecated()
                 ->end()
                 ->scalarNode('mode')
                     ->defaultValue('default')
-                    ->validate()
-                        ->ifTrue(function ($value) {
-                            return !in_array($value, ['default', 'duration_only']);
-                        })
-                        ->thenInvalid('Chosen timesheet mode is invalid, allowed values: default, duration_only')
-                    ->end()
                 ->end()
                 ->booleanNode('markdown_content')
                     ->defaultValue(false)
@@ -94,17 +98,15 @@ class Configuration implements ConfigurationInterface
                     ->arrayPrototype()
                         ->children()
                             ->arrayNode('days')
-                                ->requiresAtLeastOneElement()
                                 ->useAttributeAsKey('key')
-                                ->isRequired()
-                                ->prototype('scalar')->end()
-                                ->defaultValue([])
+                                ->scalarPrototype()->end()
+                                ->defaultValue(['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'])
                             ->end()
                             ->integerNode('begin')
-                                ->defaultValue(0)
+                                ->defaultValue(1)
                             ->end()
                             ->integerNode('end')
-                                ->defaultValue(0)
+                                ->defaultValue(1)
                             ->end()
                             ->integerNode('duration')
                                 ->defaultValue(0)
@@ -127,7 +129,15 @@ class Configuration implements ConfigurationInterface
                             ->end()
                         ->end()
                     ->end()
-                    ->defaultValue([])
+                    ->defaultValue([
+                        'default' => [
+                            'days' => ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'],
+                            'begin' => 1,
+                            'end' => 1,
+                            'duration' => 0,
+                            'mode' => 'default'
+                        ]
+                    ])
                 ->end()
                 ->arrayNode('rates')
                     ->requiresAtLeastOneElement()
@@ -138,7 +148,7 @@ class Configuration implements ConfigurationInterface
                                 ->requiresAtLeastOneElement()
                                 ->useAttributeAsKey('key')
                                 ->isRequired()
-                                ->prototype('scalar')->end()
+                                ->scalarPrototype()->end()
                                 ->defaultValue([])
                             ->end()
                             ->floatNode('factor')
@@ -195,19 +205,23 @@ class Configuration implements ConfigurationInterface
     protected function getInvoiceNode()
     {
         $builder = new TreeBuilder('invoice');
+        /** @var ArrayNodeDefinition $node */
         $node = $builder->getRootNode();
 
         $node
             ->addDefaultsIfNotSet()
             ->children()
-                ->arrayNode('documents')
-                    ->requiresAtLeastOneElement()
-                    ->isRequired()
+                ->arrayNode('defaults')
                     ->scalarPrototype()->end()
                     ->defaultValue([
                         'var/invoices/',
                         'templates/invoice/renderer/'
                     ])
+                ->end()
+                ->arrayNode('documents')
+                    ->requiresAtLeastOneElement()
+                    ->scalarPrototype()->end()
+                    ->defaultValue([])
                 ->end()
             ->end()
         ;
@@ -218,6 +232,7 @@ class Configuration implements ConfigurationInterface
     protected function getLanguagesNode()
     {
         $builder = new TreeBuilder('languages');
+        /** @var ArrayNodeDefinition $node */
         $node = $builder->getRootNode();
 
         $node
@@ -241,22 +256,32 @@ class Configuration implements ConfigurationInterface
     protected function getCalendarNode()
     {
         $builder = new TreeBuilder('calendar');
+        /** @var ArrayNodeDefinition $node */
         $node = $builder->getRootNode();
 
         $node
+            ->addDefaultsIfNotSet()
             ->children()
                 ->booleanNode('week_numbers')->defaultTrue()->end()
                 ->integerNode('day_limit')->defaultValue(4)->end()
+                ->scalarNode('slot_duration')->defaultValue('00:30:00')->end()
                 ->arrayNode('businessHours')
                     ->addDefaultsIfNotSet()
                     ->children()
                         ->arrayNode('days')
                             ->requiresAtLeastOneElement()
-                            ->prototype('integer')->end()
+                            ->integerPrototype()->end()
                             ->defaultValue([1, 2, 3, 4, 5])
                         ->end()
                         ->scalarNode('begin')->defaultValue('08:00')->end()
                         ->scalarNode('end')->defaultValue('20:00')->end()
+                    ->end()
+                ->end()
+                ->arrayNode('visibleHours')
+                    ->addDefaultsIfNotSet()
+                    ->children()
+                        ->scalarNode('begin')->defaultValue('00:00')->end()
+                        ->scalarNode('end')->defaultValue('23:59')->end()
                     ->end()
                 ->end()
                 ->arrayNode('google')
@@ -275,6 +300,7 @@ class Configuration implements ConfigurationInterface
                         ->end()
                     ->end()
                 ->end()
+                ->booleanNode('weekends')->defaultTrue()->end()
             ->end()
         ;
 
@@ -284,6 +310,7 @@ class Configuration implements ConfigurationInterface
     protected function getThemeNode()
     {
         $builder = new TreeBuilder('theme');
+        /** @var ArrayNodeDefinition $node */
         $node = $builder->getRootNode();
 
         $node
@@ -298,11 +325,63 @@ class Configuration implements ConfigurationInterface
                     ->setDeprecated('The node "%node%" at path "%path%" was removed, please delete it from your config.')
                 ->end()
                 ->scalarNode('select_type')
-                    ->defaultNull()
+                    ->defaultValue('selectpicker')
+                    ->setDeprecated()
+                ->end()
+                ->scalarNode('auto_reload_datatable')
+                    ->defaultFalse()
                 ->end()
                 ->booleanNode('show_about')
                     ->defaultTrue()
                 ->end()
+                ->arrayNode('chart')
+                    ->addDefaultsIfNotSet()
+                    ->children()
+                        ->scalarNode('background_color')->defaultValue('rgba(0,115,183,0.7)')->end()
+                        ->scalarNode('border_color')->defaultValue('#3b8bba')->end()
+                        ->scalarNode('grid_color')->defaultValue('rgba(0,0,0,.05)')->end()
+                        ->scalarNode('height')->defaultValue('200')->end()
+                    ->end()
+                ->end()
+                ->arrayNode('branding')
+                    ->addDefaultsIfNotSet()
+                    ->children()
+                        ->scalarNode('logo')
+                            ->defaultNull()
+                        ->end()
+                        ->scalarNode('mini')
+                            ->defaultNull()
+                        ->end()
+                        ->scalarNode('company')
+                            ->defaultNull()
+                        ->end()
+                        ->scalarNode('title')
+                            ->defaultNull()
+                        ->end()
+                        ->scalarNode('translation')
+                            ->defaultNull()
+                        ->end()
+                    ->end()
+                ->end()
+                ->integerNode('autocomplete_chars')
+                    ->defaultValue(3)
+                ->end()
+            ->end()
+        ;
+
+        return $node;
+    }
+
+    protected function getIndustryNode()
+    {
+        $builder = new TreeBuilder('industry');
+        /** @var ArrayNodeDefinition $node */
+        $node = $builder->getRootNode();
+
+        $node
+            ->addDefaultsIfNotSet()
+            ->children()
+                ->scalarNode('translation')->defaultNull()->end()
             ->end()
         ;
 
@@ -312,6 +391,7 @@ class Configuration implements ConfigurationInterface
     protected function getUserNode()
     {
         $builder = new TreeBuilder('user');
+        /** @var ArrayNodeDefinition $node */
         $node = $builder->getRootNode();
 
         $node
@@ -332,6 +412,7 @@ class Configuration implements ConfigurationInterface
     protected function getWidgetsNode()
     {
         $builder = new TreeBuilder('widgets');
+        /** @var ArrayNodeDefinition $node */
         $node = $builder->getRootNode();
 
         $node
@@ -347,12 +428,7 @@ class Configuration implements ConfigurationInterface
                     ->scalarNode('end')->end()
                     ->scalarNode('icon')->defaultValue('')->end()
                     ->scalarNode('color')->defaultValue('')->end()
-                    ->scalarNode('type')
-                        ->validate()
-                            ->ifNotInArray([Widget::TYPE_COUNTER, Widget::TYPE_MORE])->thenInvalid('Unknown widget type')
-                        ->end()
-                        ->defaultValue(Widget::TYPE_COUNTER)
-                    ->end()
+                    ->scalarNode('type')->defaultValue(Counter::class)->end()
                 ->end()
             ->end()
         ;
@@ -363,6 +439,7 @@ class Configuration implements ConfigurationInterface
     protected function getDashboardNode()
     {
         $builder = new TreeBuilder('dashboard');
+        /** @var ArrayNodeDefinition $node */
         $node = $builder->getRootNode();
 
         $node
@@ -371,15 +448,10 @@ class Configuration implements ConfigurationInterface
                 ->arrayPrototype()
                     ->addDefaultsIfNotSet()
                     ->children()
-                        ->scalarNode('type')
-                            ->validate()
-                                ->ifNotInArray([DashboardSection::TYPE_SIMPLE, DashboardSection::TYPE_CHART])->thenInvalid('Unknown section type')
-                            ->end()
-                            ->defaultValue(DashboardSection::TYPE_SIMPLE)
-                        ->end()
+                        ->scalarNode('type')->defaultValue(CompoundRow::class)->end()
                         ->integerNode('order')->defaultValue(0)->end()
                         ->scalarNode('title')->end()
-                        ->scalarNode('permission')->isRequired()->end()
+                        ->scalarNode('permission')->defaultNull()->end()
                         ->arrayNode('widgets')
                             ->isRequired()
                             ->performNoDeepMerging()
@@ -396,6 +468,7 @@ class Configuration implements ConfigurationInterface
     protected function getDefaultsNode()
     {
         $builder = new TreeBuilder('defaults');
+        /** @var ArrayNodeDefinition $node */
         $node = $builder->getRootNode();
 
         $node
@@ -404,9 +477,18 @@ class Configuration implements ConfigurationInterface
                 ->arrayNode('customer')
                     ->addDefaultsIfNotSet()
                     ->children()
-                        ->scalarNode('timezone')->defaultValue('Europe/Berlin')->end()
+                        ->scalarNode('timezone')->defaultNull()->end()
                         ->scalarNode('country')->defaultValue('DE')->end()
-                        ->scalarNode('currency')->defaultValue('EUR')->end()
+                        ->scalarNode('currency')->defaultValue(Customer::DEFAULT_CURRENCY)->end()
+                    ->end()
+                ->end()
+                ->arrayNode('user')
+                    ->addDefaultsIfNotSet()
+                    ->children()
+                        ->scalarNode('timezone')->defaultNull()->end()
+                        ->scalarNode('language')->defaultValue(User::DEFAULT_LANGUAGE)->end()
+                        ->scalarNode('theme')->defaultNull()->end()
+                        ->scalarNode('currency')->defaultValue(Customer::DEFAULT_CURRENCY)->end()
                     ->end()
                 ->end()
             ->end()
@@ -418,6 +500,7 @@ class Configuration implements ConfigurationInterface
     protected function getPermissionsNode()
     {
         $builder = new TreeBuilder('permissions');
+        /** @var ArrayNodeDefinition $node */
         $node = $builder->getRootNode();
 
         $node
@@ -426,36 +509,158 @@ class Configuration implements ConfigurationInterface
                 ->arrayNode('sets')
                     ->requiresAtLeastOneElement()
                     ->useAttributeAsKey('key')
-                    ->performNoDeepMerging()
                     ->arrayPrototype()
                         ->useAttributeAsKey('key')
                         ->isRequired()
-                        ->prototype('scalar')->end()
+                        ->scalarPrototype()->end()
                         ->defaultValue([])
                     ->end()
                 ->end()
                 ->arrayNode('maps')
                     ->requiresAtLeastOneElement()
                     ->useAttributeAsKey('key')
-                    ->performNoDeepMerging()
                     ->arrayPrototype()
                         ->useAttributeAsKey('key')
                         ->isRequired()
-                        ->prototype('scalar')->end()
+                        ->scalarPrototype()->end()
                         ->defaultValue([])
                     ->end()
                 ->end()
                 ->arrayNode('roles')
                     ->requiresAtLeastOneElement()
                     ->useAttributeAsKey('key')
-                    ->performNoDeepMerging()
                     ->arrayPrototype()
-                        ->useAttributeAsKey('key')
                         ->isRequired()
-                        ->prototype('scalar')->end()
+                        ->scalarPrototype()->end()
                         ->defaultValue([])
                     ->end()
+                    ->defaultValue([
+                        'ROLE_USER' => [],
+                        'ROLE_TEAMLEAD' => [],
+                        'ROLE_ADMIN' => [],
+                        'ROLE_SUPER_ADMIN' => [],
+                    ])
                 ->end()
+            ->end()
+        ;
+
+        return $node;
+    }
+
+    protected function getLdapNode()
+    {
+        $treeBuilder = new TreeBuilder('ldap');
+        $node = $treeBuilder->getRootNode();
+
+        $node
+            ->addDefaultsIfNotSet()
+            ->children()
+                ->arrayNode('connection')
+                    ->addDefaultsIfNotSet()
+                    ->children()
+                        ->scalarNode('host')->defaultNull()->end()
+                        ->scalarNode('port')->defaultValue(389)->end()
+                        ->scalarNode('useStartTls')->defaultFalse()->end()
+                        ->scalarNode('useSsl')->defaultFalse()->end()
+                        ->scalarNode('username')->end()
+                        ->scalarNode('password')->end()
+                        ->scalarNode('bindRequiresDn')->defaultTrue()->end()
+                        ->scalarNode('baseDn')->end()
+                        ->scalarNode('accountCanonicalForm')->end()
+                        ->scalarNode('accountDomainName')->end()
+                        ->scalarNode('accountDomainNameShort')->end()
+                        ->scalarNode('accountFilterFormat')
+                            ->defaultNull()
+                            ->validate()
+                                ->ifTrue(static function ($v) {
+                                    if (empty($v)) {
+                                        return false;
+                                    }
+                                    if ($v[0] !== '(' || (substr_count($v, '(') !== substr_count($v, ')'))) {
+                                        return true;
+                                    }
+
+                                    return (substr_count($v, '%s') !== 1);
+                                })
+                                ->thenInvalid('The accountFilterFormat must be enclosed by a matching number of parentheses "()" and contain one "%%s" replacer for the username')
+                            ->end()
+                        ->end()
+                        ->scalarNode('allowEmptyPassword')->end()
+                        ->scalarNode('optReferrals')->end()
+                        ->scalarNode('tryUsernameSplit')->end()
+                        ->scalarNode('networkTimeout')->end()
+                    ->end()
+                    ->validate()
+                        ->ifTrue(static function ($v) {
+                            return $v['useSsl'] && $v['useStartTls'];
+                        })
+                        ->thenInvalid('The ldap.connection.useSsl and ldap.connection.useStartTls options are mutually exclusive.')
+                    ->end()
+                ->end()
+                ->arrayNode('user')
+                    ->addDefaultsIfNotSet()
+                    ->children()
+                        ->scalarNode('baseDn')->defaultNull()->end()
+                        ->scalarNode('filter')
+                            ->defaultValue('')
+                            ->validate()
+                                ->ifTrue(static function ($v) {
+                                    if (empty($v)) {
+                                        return false;
+                                    }
+                                    if ($v[0] !== '(' || (substr_count($v, '(') !== substr_count($v, ')'))) {
+                                        return true;
+                                    }
+
+                                    return (stripos($v, '%s') !== false);
+                                })
+                                ->thenInvalid('The ldap.user.filter must be enclosed by a matching number of parentheses "()" and must NOT contain a "%%s" replacer')
+                            ->end()
+                        ->end()
+                        ->scalarNode('attributesFilter')->defaultValue('(objectClass=*)')->end()
+                        ->scalarNode('usernameAttribute')->defaultValue('uid')->end()
+                        ->arrayNode('attributes')
+                            ->defaultValue([])
+                            ->arrayPrototype()
+                                ->children()
+                                    ->scalarNode('ldap_attr')->isRequired()->cannotBeEmpty()->end()
+                                    ->scalarNode('user_method')->isRequired()->cannotBeEmpty()->end()
+                                ->end()
+                            ->end()
+                        ->end()
+                    ->end()
+                ->end()
+                ->arrayNode('role')
+                    ->addDefaultsIfNotSet()
+                    ->children()
+                        ->scalarNode('baseDn')->defaultNull()->end()
+                        ->scalarNode('filter')->end()
+                        ->scalarNode('usernameAttribute')->defaultValue('dn')->end()
+                        ->scalarNode('nameAttribute')->defaultValue('cn')->end()
+                        ->scalarNode('userDnAttribute')->defaultValue('member')->end()
+                        ->arrayNode('groups')
+                            ->defaultValue([])
+                            ->arrayPrototype()
+                                ->children()
+                                    ->scalarNode('ldap_value')->isRequired()->cannotBeEmpty()->end()
+                                    ->scalarNode('role')->isRequired()->cannotBeEmpty()->end()
+                                ->end()
+                            ->end()
+                        ->end()
+                    ->end()
+                ->end()
+            ->end()
+            ->validate()
+                ->ifTrue(static function ($v) {
+                    return null !== $v['connection']['host'] && !extension_loaded('ldap');
+                })
+                ->thenInvalid('LDAP is activated, but the LDAP PHP extension is not loaded.')
+            ->end()
+            ->validate()
+                ->ifTrue(static function ($v) {
+                    return null !== $v['connection']['host'] && empty($v['user']['baseDn']);
+                })
+                ->thenInvalid('The "ldap.user.baseDn" config must be set if LDAP is activated.')
             ->end()
         ;
 

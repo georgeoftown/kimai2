@@ -9,45 +9,32 @@
 
 namespace App\Tests\Export\Renderer;
 
-use App\Entity\User;
 use App\Export\Renderer\PDFRenderer;
-use App\Repository\UserRepository;
-use App\Security\CurrentUser;
-use App\Timesheet\UserDateTimeFactory;
+use App\Tests\Mocks\Security\UserDateTimeFactoryFactory;
 use App\Utils\HtmlToPdfConverter;
 use App\Utils\MPdfConverter;
 use Symfony\Component\HttpFoundation\Request;
-use Symfony\Component\Security\Core\Authentication\Token\Storage\TokenStorage;
-use Symfony\Component\Security\Core\Authentication\Token\UsernamePasswordToken;
 use Twig\Environment;
 
 /**
+ * @covers \App\Export\Base\PDFRenderer
+ * @covers \App\Export\Base\RendererTrait
  * @covers \App\Export\Renderer\PDFRenderer
- * @covers \App\Export\Renderer\RendererTrait
+ * @group integration
  */
 class PdfRendererTest extends AbstractRendererTest
 {
     protected function getDateTimeFactory()
     {
-        $user = new User();
-        $repository = $this->getMockBuilder(UserRepository::class)->setMethods(['getById'])->disableOriginalConstructor()->getMock();
-        $repository->expects($this->once())->method('getById')->willReturn($user);
-        $token = $this->getMockBuilder(UsernamePasswordToken::class)->setMethods(['getUser'])->disableOriginalConstructor()->getMock();
-        $token->expects($this->once())->method('getUser')->willReturn($user);
-        $tokenStorage = new TokenStorage();
-        $tokenStorage->setToken($token);
-
-        $user = new CurrentUser($tokenStorage, $repository);
-
-        return new UserDateTimeFactory($user);
+        return (new UserDateTimeFactoryFactory($this))->create();
     }
 
     public function testConfiguration()
     {
         $sut = new PDFRenderer(
-            $this->getMockBuilder(Environment::class)->disableOriginalConstructor()->getMock(),
+            $this->createMock(Environment::class),
             $this->getDateTimeFactory(),
-            $this->getMockBuilder(HtmlToPdfConverter::class)->getMock()
+            $this->createMock(HtmlToPdfConverter::class)
         );
 
         $this->assertEquals('pdf', $sut->getId());

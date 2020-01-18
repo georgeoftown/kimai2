@@ -10,18 +10,23 @@
 namespace App\Invoice\Renderer;
 
 use App\Entity\InvoiceDocument;
-use App\Model\InvoiceModel;
+use App\Invoice\InvoiceModel;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 use Symfony\Component\HttpFoundation\Response;
 
+/**
+ * @internal
+ */
 abstract class AbstractSpreadsheetRenderer extends AbstractRenderer
 {
     /**
+     * Saves the Spreadhseet and returns the filename.
+     *
      * @param Spreadsheet $spreadsheet
-     * @return bool|string
-     * @throws \PhpOffice\PhpSpreadsheet\Writer\Exception
+     * @return string
+     * @throws \Exception
      */
     abstract protected function saveSpreadsheet(Spreadsheet $spreadsheet);
 
@@ -31,46 +36,64 @@ abstract class AbstractSpreadsheetRenderer extends AbstractRenderer
      * @param InvoiceDocument $document
      * @param InvoiceModel $model
      * @return Response
+     * @throws \Exception
      */
     public function render(InvoiceDocument $document, InvoiceModel $model): Response
     {
         $spreadsheet = IOFactory::load($document->getFilename());
         $worksheet = $spreadsheet->getActiveSheet();
         $entries = $model->getCalculator()->getEntries();
-        $replacer = $this->modelToReplacer($model);
-        $timesheetAmount = count($entries);
-        if ($timesheetAmount > 1) {
-            $this->addTemplateRows($worksheet, $timesheetAmount);
+        $sheetReplacer = $model->toArray();
+        $invoiceItemCount = count($entries);
+        if ($invoiceItemCount > 1) {
+            $this->addTemplateRows($worksheet, $invoiceItemCount);
         }
 
-        $worksheet->setTitle($model->getTemplate()->getTitle());
+        // cleanup the title, PHP Office doesn't allow arbitrary strings
+        $title = substr($model->getTemplate()->getTitle(), 0, 31);
+        foreach (Worksheet::getInvalidCharacters() as $char) {
+            $title = str_replace($char, ' ', $title);
+        }
+
+        $worksheet->setTitle($title);
 
         $entryRow = 0;
 
         foreach ($worksheet->getRowIterator() as $row) {
-            $timesheet = $entries[$entryRow];
             $sheetValues = false;
             foreach ($row->getCellIterator() as $cell) {
                 $value = $cell->getValue();
-                if (stripos($value, '${entry.') !== false) {
-                    if ($sheetValues === false) {
-                        $sheetValues = $this->timesheetToArray($timesheet);
-                    }
-                    $searcher = str_replace('${', '', $value);
-                    $searcher = str_replace('}', '', $searcher);
-                    if (isset($sheetValues[$searcher])) {
-                        $cell->setValue($sheetValues[$searcher]);
-                    }
-                } elseif (stripos($value, '${') !== false) {
-                    $searcher = str_replace('${', '', $value);
-                    $searcher = str_replace('}', '', $searcher);
-                    if (isset($replacer[$searcher])) {
-                        $cell->setValue($replacer[$searcher]);
-                    }
+                $replacer = null;
+                if (stripos($value, '${') === false) {
+                    continue;
                 }
+
+                if (stripos($value, '${entry.') !== false) {
+                    if ($sheetValues === false && isset($entries[$entryRow])) {
+                        $sheetValues = $model->itemToArray($entries[$entryRow]);
+                    }
+                    $replacer = $sheetValues;
+                } elseif (stripos($value, '${') !== false) {
+                    $replacer = $sheetReplacer;
+                }
+
+                if (empty($replacer)) {
+                    continue;
+                }
+
+                // we can have mixed cell content, which makes it much more complicated
+                foreach ($replacer as $key => $content) {
+                    $searchKey = '${' . $key . '}';
+                    if (stripos($value, $searchKey) === false) {
+                        continue;
+                    }
+                    $value = str_replace($searchKey, $content, $value);
+                }
+
+                $cell->setValue($value);
             }
 
-            if ($sheetValues !== false && $entryRow < $timesheetAmount - 1) {
+            if ($sheetValues !== false && $entryRow < $invoiceItemCount - 1) {
                 $entryRow++;
             }
         }
@@ -82,9 +105,10 @@ abstract class AbstractSpreadsheetRenderer extends AbstractRenderer
 
     /**
      * @param Worksheet $worksheet
-     * @param int $timesheets
+     * @param int $invoiceItemCount
+     * @throws \PhpOffice\PhpSpreadsheet\Exception
      */
-    protected function addTemplateRows(Worksheet $worksheet, int $timesheets)
+    protected function addTemplateRows(Worksheet $worksheet, int $invoiceItemCount)
     {
         $startRow = null;
         $rowCounter = 0;
@@ -95,7 +119,7 @@ abstract class AbstractSpreadsheetRenderer extends AbstractRenderer
                 $value = $cell->getValue();
                 if (stripos($value, '${entry.') !== false) {
                     $startRow = $row->getRowIndex();
-                    $worksheet->insertNewRowBefore($row->getRowIndex(), $timesheets - 1);
+                    $worksheet->insertNewRowBefore($startRow + 1, $invoiceItemCount - 1);
                     break 2;
                 }
 
@@ -113,15 +137,18 @@ abstract class AbstractSpreadsheetRenderer extends AbstractRenderer
             throw new \Exception('Invalid invoice document, no template row found.');
         }
 
-        // fill up all new rows with template values
-        $templateRow = $timesheets + $startRow;
-        $iterator = $worksheet->getRowIterator($templateRow - 1, $templateRow);
+        // fill up all new rows with template replacer
+        $templateRow = $startRow;
+        $iterator = $worksheet->getRowIterator($templateRow, $templateRow + 1);
+
         $templateColumns = [];
-        foreach ($iterator->current()->getCellIterator() as $cell) {
+
+        $tmpRow = $iterator->current();
+        foreach ($tmpRow->getCellIterator() as $cell) {
             $templateColumns[$cell->getColumn()] = $cell->getValue();
         }
 
-        $iterator = $worksheet->getRowIterator($startRow, $templateRow - 2);
+        $iterator = $worksheet->getRowIterator($startRow, $startRow + $invoiceItemCount - 1);
         foreach ($iterator as $row) {
             foreach ($row->getCellIterator() as $cell) {
                 $cell->setValue($templateColumns[$cell->getColumn()]);

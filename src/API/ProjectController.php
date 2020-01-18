@@ -12,49 +12,60 @@ declare(strict_types=1);
 namespace App\API;
 
 use App\Entity\Project;
-use App\Form\ProjectEditForm;
+use App\Event\ProjectMetaDefinitionEvent;
+use App\Form\API\ProjectApiEditForm;
 use App\Repository\ProjectRepository;
 use App\Repository\Query\ProjectQuery;
+use App\Timesheet\UserDateTimeFactory;
+use App\Utils\SearchTerm;
 use FOS\RestBundle\Controller\Annotations as Rest;
 use FOS\RestBundle\Controller\Annotations\RouteResource;
 use FOS\RestBundle\Request\ParamFetcherInterface;
 use FOS\RestBundle\View\View;
 use FOS\RestBundle\View\ViewHandlerInterface;
+use Nelmio\ApiDocBundle\Annotation\Security as ApiSecurity;
 use Sensio\Bundle\FrameworkExtraBundle\Configuration\Security;
 use Swagger\Annotations as SWG;
+use Symfony\Component\EventDispatcher\EventDispatcherInterface;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
+use Symfony\Component\Validator\Constraints;
 
 /**
  * @RouteResource("Project")
  *
- * @Security("is_granted('ROLE_USER')")
+ * @Security("is_granted('IS_AUTHENTICATED_REMEMBERED')")
  */
 class ProjectController extends BaseApiController
 {
     /**
      * @var ProjectRepository
      */
-    protected $repository;
-
+    private $repository;
     /**
      * @var ViewHandlerInterface
      */
-    protected $viewHandler;
-
+    private $viewHandler;
     /**
-     * @param ViewHandlerInterface $viewHandler
-     * @param ProjectRepository $repository
+     * @var EventDispatcherInterface
      */
-    public function __construct(ViewHandlerInterface $viewHandler, ProjectRepository $repository)
+    private $dispatcher;
+    /**
+     * @var UserDateTimeFactory
+     */
+    private $dateTime;
+
+    public function __construct(ViewHandlerInterface $viewHandler, ProjectRepository $repository, EventDispatcherInterface $dispatcher, UserDateTimeFactory $dateTime)
     {
         $this->viewHandler = $viewHandler;
         $this->repository = $repository;
+        $this->dispatcher = $dispatcher;
+        $this->dateTime = $dateTime;
     }
 
     /**
-     * Returns a collection of projects
+     * Returns a collection of projects.
      *
      * @SWG\Response(
      *      response=200,
@@ -65,20 +76,21 @@ class ProjectController extends BaseApiController
      *      )
      * )
      * @Rest\QueryParam(name="customer", requirements="\d+", strict=true, nullable=true, description="Customer ID to filter projects")
-     * @Rest\QueryParam(name="visible", requirements="\d+", strict=true, nullable=true, description="Visibility status to filter projects (1=visible, 2=hidden, 3=both)")
+     * @Rest\QueryParam(name="visible", requirements="\d+", strict=true, nullable=true, description="Visibility status to filter projects. Allowed values: 1=visible, 2=hidden, 3=both (default; 1)")
+     * @Rest\QueryParam(name="start", requirements=@Constraints\DateTime(format="Y-m-d\TH:i:s"), strict=true, nullable=true, description="Only projects that started before this date will be included. Allowed format: HTML5 (default: now, if end is also empty)")
+     * @Rest\QueryParam(name="end", requirements=@Constraints\DateTime(format="Y-m-d\TH:i:s"), strict=true, nullable=true, description="Only projects that ended after this date will be included. Allowed format: HTML5 (default: now, if start is also empty)")
+     * @Rest\QueryParam(name="ignoreDates", requirements="1", strict=true, nullable=true, description="If set, start and end are completely ignored. Allowed values: 1 (default: off)")
      * @Rest\QueryParam(name="order", requirements="ASC|DESC", strict=true, nullable=true, description="The result order. Allowed values: ASC, DESC (default: ASC)")
      * @Rest\QueryParam(name="orderBy", requirements="id|name|customer", strict=true, nullable=true, description="The field by which results will be ordered. Allowed values: id, name, customer (default: name)")
+     * @Rest\QueryParam(name="term", requirements="[a-zA-Z0-9 \-,:]+", strict=true, nullable=true, description="Free search term")
      *
-     * @param ParamFetcherInterface $paramFetcher
-     * @return Response
+     * @ApiSecurity(name="apiUser")
+     * @ApiSecurity(name="apiToken")
      */
-    public function cgetAction(ParamFetcherInterface $paramFetcher)
+    public function cgetAction(ParamFetcherInterface $paramFetcher): Response
     {
         $query = new ProjectQuery();
-        $query
-            ->setResultType(ProjectQuery::RESULT_TYPE_OBJECTS)
-            ->setOrderBy('name')
-        ;
+        $query->setCurrentUser($this->getUser());
 
         if (null !== ($order = $paramFetcher->get('order'))) {
             $query->setOrder($order);
@@ -96,7 +108,32 @@ class ProjectController extends BaseApiController
             $query->setVisibility($visible);
         }
 
-        $data = $this->repository->findByQuery($query);
+        $ignoreDates = false;
+        if (null !== $paramFetcher->get('ignoreDates')) {
+            $ignoreDates = intval($paramFetcher->get('ignoreDates')) === 1;
+        }
+
+        if (!$ignoreDates) {
+            if (null !== ($begin = $paramFetcher->get('start')) && !empty($begin)) {
+                $query->setProjectStart($this->dateTime->createDateTime($begin));
+            }
+
+            if (null !== ($end = $paramFetcher->get('end')) && !empty($end)) {
+                $query->setProjectEnd($this->dateTime->createDateTime($end));
+            }
+
+            if (empty($begin) && empty($end)) {
+                $now = $this->dateTime->createDateTime();
+                $query->setProjectStart($now);
+                $query->setProjectEnd($now);
+            }
+        }
+
+        if (!empty($term = $paramFetcher->get('term'))) {
+            $query->setSearchTerm(new SearchTerm($term));
+        }
+
+        $data = $this->repository->getProjectsForQuery($query);
         $view = new View($data, 200);
         $view->getContext()->setGroups(['Default', 'Collection', 'Project']);
 
@@ -112,15 +149,17 @@ class ProjectController extends BaseApiController
      *      @SWG\Schema(ref="#/definitions/ProjectEntity"),
      * )
      *
-     * @param int $id
-     * @return Response
+     * @ApiSecurity(name="apiUser")
+     * @ApiSecurity(name="apiToken")
      */
-    public function getAction($id)
+    public function getAction(int $id): Response
     {
         $data = $this->repository->find($id);
+
         if (null === $data) {
             throw new NotFoundException();
         }
+
         $view = new View($data, 200);
         $view->getContext()->setGroups(['Default', 'Entity', 'Project']);
 
@@ -145,13 +184,10 @@ class ProjectController extends BaseApiController
      *      @SWG\Schema(ref="#/definitions/ProjectEditForm")
      * )
      *
-     * @param Request $request
-     * @return Response
-     * @throws \App\Repository\RepositoryException
-     * @throws \Doctrine\ORM\ORMException
-     * @throws \Doctrine\ORM\OptimisticLockException
+     * @ApiSecurity(name="apiUser")
+     * @ApiSecurity(name="apiToken")
      */
-    public function postAction(Request $request)
+    public function postAction(Request $request): Response
     {
         if (!$this->isGranted('create_project')) {
             throw new AccessDeniedHttpException('User cannot create projects');
@@ -159,16 +195,15 @@ class ProjectController extends BaseApiController
 
         $project = new Project();
 
-        $form = $this->createForm(ProjectEditForm::class, $project, [
-            'csrf_protection' => false,
-        ]);
+        $event = new ProjectMetaDefinitionEvent($project);
+        $this->dispatcher->dispatch($event);
+
+        $form = $this->createForm(ProjectApiEditForm::class, $project);
 
         $form->submit($request->request->all());
 
         if ($form->isValid()) {
-            $entityManager = $this->getDoctrine()->getManager();
-            $entityManager->persist($project);
-            $entityManager->flush();
+            $this->repository->saveProject($project);
 
             $view = new View($project, 200);
             $view->getContext()->setGroups(['Default', 'Entity', 'Project']);
@@ -207,11 +242,10 @@ class ProjectController extends BaseApiController
      *      required=true,
      * )
      *
-     * @param Request $request
-     * @param string $id
-     * @return Response
+     * @ApiSecurity(name="apiUser")
+     * @ApiSecurity(name="apiToken")
      */
-    public function patchAction(Request $request, string $id)
+    public function patchAction(Request $request, int $id): Response
     {
         $project = $this->repository->find($id);
 
@@ -223,9 +257,10 @@ class ProjectController extends BaseApiController
             throw new AccessDeniedHttpException('User cannot update project');
         }
 
-        $form = $this->createForm(ProjectEditForm::class, $project, [
-            'csrf_protection' => false,
-        ]);
+        $event = new ProjectMetaDefinitionEvent($project);
+        $this->dispatcher->dispatch($event);
+
+        $form = $this->createForm(ProjectApiEditForm::class, $project);
 
         $form->setData($project);
         $form->submit($request->request->all(), false);
@@ -237,11 +272,62 @@ class ProjectController extends BaseApiController
             return $this->viewHandler->handle($view);
         }
 
-        $entityManager = $this->getDoctrine()->getManager();
-        $entityManager->persist($project);
-        $entityManager->flush();
+        $this->repository->saveProject($project);
 
         $view = new View($project, Response::HTTP_OK);
+        $view->getContext()->setGroups(['Default', 'Entity', 'Project']);
+
+        return $this->viewHandler->handle($view);
+    }
+
+    /**
+     * Sets the value of a meta-field for an existing project.
+     *
+     * @SWG\Response(
+     *      response=200,
+     *      description="Sets the value of an existing/configured meta-field. You cannot create unknown meta-fields, if the given name is not a configured meta-field, this will return an exception.",
+     *      @SWG\Schema(ref="#/definitions/ProjectEntity")
+     * )
+     * @SWG\Parameter(
+     *      name="id",
+     *      in="path",
+     *      type="integer",
+     *      description="Project record ID to set the meta-field value for",
+     *      required=true,
+     * )
+     * @Rest\RequestParam(name="name", strict=true, nullable=false, description="The meta-field name")
+     * @Rest\RequestParam(name="value", strict=true, nullable=false, description="The meta-field value")
+     *
+     * @ApiSecurity(name="apiUser")
+     * @ApiSecurity(name="apiToken")
+     */
+    public function metaAction(int $id, ParamFetcherInterface $paramFetcher): Response
+    {
+        $project = $this->repository->find($id);
+
+        if (null === $project) {
+            throw new NotFoundException();
+        }
+
+        if (!$this->isGranted('edit', $project)) {
+            throw new AccessDeniedHttpException('You are not allowed to update this project');
+        }
+
+        $event = new ProjectMetaDefinitionEvent($project);
+        $this->dispatcher->dispatch($event);
+
+        $name = $paramFetcher->get('name');
+        $value = $paramFetcher->get('value');
+
+        if (null === ($meta = $project->getMetaField($name))) {
+            throw new \InvalidArgumentException('Unknown meta-field requested');
+        }
+
+        $meta->setValue($value);
+
+        $this->repository->saveProject($project);
+
+        $view = new View($project, 200);
         $view->getContext()->setGroups(['Default', 'Entity', 'Project']);
 
         return $this->viewHandler->handle($view);

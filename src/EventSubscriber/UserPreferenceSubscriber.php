@@ -9,6 +9,7 @@
 
 namespace App\EventSubscriber;
 
+use App\Configuration\FormConfiguration;
 use App\Entity\User;
 use App\Entity\UserPreference;
 use App\Event\PrepareUserEvent;
@@ -32,37 +33,57 @@ class UserPreferenceSubscriber implements EventSubscriberInterface
      * @var EventDispatcherInterface
      */
     protected $eventDispatcher;
-
     /**
      * @var AuthorizationCheckerInterface
      */
     protected $voter;
-
     /**
      * @var TokenStorageInterface
      */
     protected $storage;
-
     /**
-     * @param EventDispatcherInterface $dispatcher
-     * @param TokenStorageInterface $storage
-     * @param AuthorizationCheckerInterface $voter
+     * @var FormConfiguration
      */
-    public function __construct(EventDispatcherInterface $dispatcher, TokenStorageInterface $storage, AuthorizationCheckerInterface $voter)
+    protected $formConfig;
+
+    public function __construct(EventDispatcherInterface $dispatcher, TokenStorageInterface $storage, AuthorizationCheckerInterface $voter, FormConfiguration $formConfig)
     {
         $this->eventDispatcher = $dispatcher;
         $this->storage = $storage;
         $this->voter = $voter;
+        $this->formConfig = $formConfig;
     }
 
-    /**
-     * @return array
-     */
     public static function getSubscribedEvents(): array
     {
         return [
-            PrepareUserEvent::PREPARE => ['loadUserPreferences', 200]
+            PrepareUserEvent::class => ['loadUserPreferences', 200]
         ];
+    }
+
+    private function getDefaultTheme(): ?string
+    {
+        return $this->formConfig->getUserDefaultTheme();
+    }
+
+    private function getDefaultCurrency(): ?string
+    {
+        return $this->formConfig->getUserDefaultCurrency();
+    }
+
+    private function getDefaultLanguage(): string
+    {
+        return $this->formConfig->getUserDefaultLanguage();
+    }
+
+    private function getDefaultTimezone(): string
+    {
+        $timezone = $this->formConfig->getUserDefaultTimezone();
+        if (null === $timezone) {
+            $timezone = date_default_timezone_get();
+        }
+
+        return $timezone;
     }
 
     /**
@@ -72,52 +93,63 @@ class UserPreferenceSubscriber implements EventSubscriberInterface
     public function getDefaultPreferences(User $user)
     {
         $enableHourlyRate = false;
+        $hourlyRateOptions = [];
 
         if ($this->voter->isGranted('hourly-rate', $user)) {
             $enableHourlyRate = true;
+            $hourlyRateOptions = ['currency' => $this->getDefaultCurrency()];
         }
 
         return [
             (new UserPreference())
                 ->setName(UserPreference::HOURLY_RATE)
                 ->setValue(0)
+                ->setOrder(100)
                 ->setType(MoneyType::class)
                 ->setEnabled($enableHourlyRate)
+                ->setOptions($hourlyRateOptions)
                 ->addConstraint(new Range(['min' => 0])),
 
             (new UserPreference())
                 ->setName(UserPreference::TIMEZONE)
-                ->setValue(date_default_timezone_get())
+                ->setValue($this->getDefaultTimezone())
+                ->setOrder(200)
                 ->setType(TimezoneType::class),
 
             (new UserPreference())
                 ->setName(UserPreference::LOCALE)
-                ->setValue(User::DEFAULT_LANGUAGE)
+                ->setValue($this->getDefaultLanguage())
+                ->setOrder(300)
                 ->setType(LanguageType::class),
 
             (new UserPreference())
                 ->setName(UserPreference::SKIN)
-                ->setValue('green')
+                ->setValue($this->getDefaultTheme())
+                ->setOrder(400)
                 ->setType(SkinType::class),
 
             (new UserPreference())
                 ->setName('theme.collapsed_sidebar')
                 ->setValue(false)
+                ->setOrder(500)
                 ->setType(CheckboxType::class),
 
             (new UserPreference())
                 ->setName('calendar.initial_view')
                 ->setValue(CalendarViewType::DEFAULT_VIEW)
+                ->setOrder(600)
                 ->setType(CalendarViewType::class),
 
             (new UserPreference())
                 ->setName('login.initial_view')
                 ->setValue(InitialViewType::DEFAULT_VIEW)
+                ->setOrder(700)
                 ->setType(InitialViewType::class),
 
             (new UserPreference())
                 ->setName('timesheet.daily_stats')
                 ->setValue(false)
+                ->setOrder(800)
                 ->setType(CheckboxType::class),
         ];
     }
@@ -127,47 +159,24 @@ class UserPreferenceSubscriber implements EventSubscriberInterface
      */
     public function loadUserPreferences(PrepareUserEvent $event)
     {
-        if (!$this->canHandleEvent($event)) {
-            return;
-        }
-
         $user = $event->getUser();
 
-        $prefs = [];
-        foreach ($user->getPreferences() as $preference) {
-            $prefs[$preference->getName()] = $preference;
-        }
-
         $event = new UserPreferenceEvent($user, $this->getDefaultPreferences($user));
-        $this->eventDispatcher->dispatch(UserPreferenceEvent::CONFIGURE, $event);
+        $this->eventDispatcher->dispatch($event);
 
         foreach ($event->getPreferences() as $preference) {
-            /* @var UserPreference[] $prefs */
-            if (isset($prefs[$preference->getName()])) {
-                /* @var UserPreference $pref */
-                $prefs[$preference->getName()]
+            $userPref = $user->getPreference($preference->getName());
+            if (null !== $userPref) {
+                $userPref
                     ->setType($preference->getType())
                     ->setConstraints($preference->getConstraints())
                     ->setEnabled($preference->isEnabled())
+                    ->setOptions($preference->getOptions())
+                    ->setOrder($preference->getOrder())
                 ;
             } else {
-                $prefs[$preference->getName()] = $preference;
+                $user->addPreference($preference);
             }
         }
-
-        $user->setPreferences(array_values($prefs));
-    }
-
-    /**
-     * @param PrepareUserEvent $event
-     * @return bool
-     */
-    protected function canHandleEvent(PrepareUserEvent $event): bool
-    {
-        if (null === ($user = $event->getUser())) {
-            return false;
-        }
-
-        return ($user instanceof User);
     }
 }

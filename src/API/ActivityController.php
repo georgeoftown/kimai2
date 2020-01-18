@@ -12,16 +12,20 @@ declare(strict_types=1);
 namespace App\API;
 
 use App\Entity\Activity;
-use App\Form\ActivityEditForm;
+use App\Event\ActivityMetaDefinitionEvent;
+use App\Form\API\ActivityApiEditForm;
 use App\Repository\ActivityRepository;
 use App\Repository\Query\ActivityQuery;
+use App\Utils\SearchTerm;
 use FOS\RestBundle\Controller\Annotations as Rest;
 use FOS\RestBundle\Controller\Annotations\RouteResource;
 use FOS\RestBundle\Request\ParamFetcherInterface;
 use FOS\RestBundle\View\View;
 use FOS\RestBundle\View\ViewHandlerInterface;
+use Nelmio\ApiDocBundle\Annotation\Security as ApiSecurity;
 use Sensio\Bundle\FrameworkExtraBundle\Configuration\Security;
 use Swagger\Annotations as SWG;
+use Symfony\Component\EventDispatcher\EventDispatcherInterface;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
@@ -29,28 +33,28 @@ use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 /**
  * @RouteResource("Activity")
  *
- * @Security("is_granted('ROLE_USER')")
+ * @Security("is_granted('IS_AUTHENTICATED_REMEMBERED')")
  */
 class ActivityController extends BaseApiController
 {
     /**
      * @var ActivityRepository
      */
-    protected $repository;
-
+    private $repository;
     /**
      * @var ViewHandlerInterface
      */
-    protected $viewHandler;
-
+    private $viewHandler;
     /**
-     * @param ViewHandlerInterface $viewHandler
-     * @param ActivityRepository $repository
+     * @var EventDispatcherInterface
      */
-    public function __construct(ViewHandlerInterface $viewHandler, ActivityRepository $repository)
+    private $dispatcher;
+
+    public function __construct(ViewHandlerInterface $viewHandler, ActivityRepository $repository, EventDispatcherInterface $dispatcher)
     {
         $this->viewHandler = $viewHandler;
         $this->repository = $repository;
+        $this->dispatcher = $dispatcher;
     }
 
     /**
@@ -67,19 +71,17 @@ class ActivityController extends BaseApiController
      * @Rest\QueryParam(name="project", requirements="\d+", strict=true, nullable=true, description="Project ID to filter activities. If none is provided, all activities will be returned.")
      * @Rest\QueryParam(name="visible", requirements="1|2|3", strict=true, nullable=true, description="Visibility status to filter activities. Allowed values: 1=visible, 2=hidden, 3=all (default: 1)")
      * @Rest\QueryParam(name="globals", requirements="true", strict=true, nullable=true, description="Use if you want to fetch only global activities. Allowed values: true (default: false)")
-     * @Rest\QueryParam(name="globalsFirst", requirements="false", strict=true, nullable=true, description="Use if you don't want global activities to be listed first. Allowed values: false (default: true)")
+     * @Rest\QueryParam(name="globalsFirst", requirements="true|false", strict=true, nullable=true, description="Deprecated parameter, value is not used any more")
      * @Rest\QueryParam(name="orderBy", requirements="id|name|project", strict=true, nullable=true, description="The field by which results will be ordered. Allowed values: id, name, project (default: name)")
      * @Rest\QueryParam(name="order", requirements="ASC|DESC", strict=true, nullable=true, description="The result order. Allowed values: ASC, DESC (default: ASC)")
+     * @Rest\QueryParam(name="term", requirements="[a-zA-Z0-9 \-,:]+", strict=true, nullable=true, description="Free search term")
      *
-     * @return Response
+     * @ApiSecurity(name="apiUser")
+     * @ApiSecurity(name="apiToken")
      */
-    public function cgetAction(ParamFetcherInterface $paramFetcher)
+    public function cgetAction(ParamFetcherInterface $paramFetcher): Response
     {
         $query = new ActivityQuery();
-        $query->setOrderGlobalsFirst(true)
-            ->setResultType(ActivityQuery::RESULT_TYPE_OBJECTS)
-            ->setOrderBy('name')
-        ;
 
         if (null !== ($order = $paramFetcher->get('order'))) {
             $query->setOrder($order);
@@ -93,8 +95,8 @@ class ActivityController extends BaseApiController
             $query->setGlobalsOnly(true);
         }
 
-        if ('false' === $paramFetcher->get('globalsFirst')) {
-            $query->setOrderGlobalsFirst(false);
+        if (null !== $paramFetcher->get('globalsFirst')) {
+            @trigger_error('API parameter globalsFirst is deprecated and will be removed with 2.0', E_USER_DEPRECATED);
         }
 
         if (!empty($project = $paramFetcher->get('project'))) {
@@ -105,7 +107,11 @@ class ActivityController extends BaseApiController
             $query->setVisibility($visible);
         }
 
-        $data = $this->repository->findByQuery($query);
+        if (!empty($term = $paramFetcher->get('term'))) {
+            $query->setSearchTerm(new SearchTerm($term));
+        }
+
+        $data = $this->repository->getActivitiesForQuery($query);
         $view = new View($data, 200);
         $view->getContext()->setGroups(['Default', 'Collection', 'Activity']);
 
@@ -128,10 +134,10 @@ class ActivityController extends BaseApiController
      *      required=true,
      * )
      *
-     * @param int $id
-     * @return Response
+     * @ApiSecurity(name="apiUser")
+     * @ApiSecurity(name="apiToken")
      */
-    public function getAction($id)
+    public function getAction(int $id): Response
     {
         $data = $this->repository->find($id);
 
@@ -163,13 +169,10 @@ class ActivityController extends BaseApiController
      *      @SWG\Schema(ref="#/definitions/ActivityEditForm")
      * )
      *
-     * @param Request $request
-     * @return Response
-     * @throws \App\Repository\RepositoryException
-     * @throws \Doctrine\ORM\ORMException
-     * @throws \Doctrine\ORM\OptimisticLockException
+     * @ApiSecurity(name="apiUser")
+     * @ApiSecurity(name="apiToken")
      */
-    public function postAction(Request $request)
+    public function postAction(Request $request): Response
     {
         if (!$this->isGranted('create_activity')) {
             throw new AccessDeniedHttpException('User cannot create activities');
@@ -177,16 +180,15 @@ class ActivityController extends BaseApiController
 
         $activity = new Activity();
 
-        $form = $this->createForm(ActivityEditForm::class, $activity, [
-            'csrf_protection' => false,
-        ]);
+        $event = new ActivityMetaDefinitionEvent($activity);
+        $this->dispatcher->dispatch($event);
+
+        $form = $this->createForm(ActivityApiEditForm::class, $activity);
 
         $form->submit($request->request->all());
 
         if ($form->isValid()) {
-            $entityManager = $this->getDoctrine()->getManager();
-            $entityManager->persist($activity);
-            $entityManager->flush();
+            $this->repository->saveActivity($activity);
 
             $view = new View($activity, 200);
             $view->getContext()->setGroups(['Default', 'Entity', 'Activity']);
@@ -225,11 +227,10 @@ class ActivityController extends BaseApiController
      *      required=true,
      * )
      *
-     * @param Request $request
-     * @param string $id
-     * @return Response
+     * @ApiSecurity(name="apiUser")
+     * @ApiSecurity(name="apiToken")
      */
-    public function patchAction(Request $request, string $id)
+    public function patchAction(Request $request, int $id): Response
     {
         $activity = $this->repository->find($id);
 
@@ -241,9 +242,10 @@ class ActivityController extends BaseApiController
             throw new AccessDeniedHttpException('User cannot update activity');
         }
 
-        $form = $this->createForm(ActivityEditForm::class, $activity, [
-            'csrf_protection' => false,
-        ]);
+        $event = new ActivityMetaDefinitionEvent($activity);
+        $this->dispatcher->dispatch($event);
+
+        $form = $this->createForm(ActivityApiEditForm::class, $activity);
 
         $form->setData($activity);
         $form->submit($request->request->all(), false);
@@ -255,12 +257,63 @@ class ActivityController extends BaseApiController
             return $this->viewHandler->handle($view);
         }
 
-        $entityManager = $this->getDoctrine()->getManager();
-        $entityManager->persist($activity);
-        $entityManager->flush();
+        $this->repository->saveActivity($activity);
 
         $view = new View($activity, Response::HTTP_OK);
         $view->getContext()->setGroups(['Default', 'Entity', 'Activity']);
+
+        return $this->viewHandler->handle($view);
+    }
+
+    /**
+     * Sets the value of a meta-field for an existing activity.
+     *
+     * @SWG\Response(
+     *      response=200,
+     *      description="Sets the value of an existing/configured meta-field. You cannot create unknown meta-fields, if the given name is not a configured meta-field, this will return an exception.",
+     *      @SWG\Schema(ref="#/definitions/ActivityEntity")
+     * )
+     * @SWG\Parameter(
+     *      name="id",
+     *      in="path",
+     *      type="integer",
+     *      description="Activity record ID to set the meta-field value for",
+     *      required=true,
+     * )
+     * @Rest\RequestParam(name="name", strict=true, nullable=false, description="The meta-field name")
+     * @Rest\RequestParam(name="value", strict=true, nullable=false, description="The meta-field value")
+     *
+     * @ApiSecurity(name="apiUser")
+     * @ApiSecurity(name="apiToken")
+     */
+    public function metaAction(int $id, ParamFetcherInterface $paramFetcher): Response
+    {
+        $activity = $this->repository->find($id);
+
+        if (null === $activity) {
+            throw new NotFoundException();
+        }
+
+        if (!$this->isGranted('edit', $activity)) {
+            throw new AccessDeniedHttpException('You are not allowed to update this activity');
+        }
+
+        $event = new ActivityMetaDefinitionEvent($activity);
+        $this->dispatcher->dispatch($event);
+
+        $name = $paramFetcher->get('name');
+        $value = $paramFetcher->get('value');
+
+        if (null === ($meta = $activity->getMetaField($name))) {
+            throw new \InvalidArgumentException('Unknown meta-field requested');
+        }
+
+        $meta->setValue($value);
+
+        $this->repository->saveActivity($activity);
+
+        $view = new View($activity, 200);
+        $view->getContext()->setGroups(['Default', 'Entity', 'Project']);
 
         return $this->viewHandler->handle($view);
     }

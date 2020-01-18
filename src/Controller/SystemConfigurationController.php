@@ -14,8 +14,11 @@ use App\Event\SystemConfigurationEvent;
 use App\Form\Model\Configuration;
 use App\Form\Model\SystemConfiguration as SystemConfigurationModel;
 use App\Form\SystemConfigurationForm;
-use App\Form\Type\EnhancedSelectboxType;
-use App\Form\Type\TimesheetModeType;
+use App\Form\Type\LanguageType;
+use App\Form\Type\RoundingModeType;
+use App\Form\Type\SkinType;
+use App\Form\Type\TrackingModeType;
+use App\Form\Type\WeekDaysType;
 use App\Repository\ConfigurationRepository;
 use Sensio\Bundle\FrameworkExtraBundle\Configuration\Security;
 use Symfony\Component\EventDispatcher\EventDispatcherInterface;
@@ -23,10 +26,14 @@ use Symfony\Component\Form\Extension\Core\Type\CheckboxType;
 use Symfony\Component\Form\Extension\Core\Type\CountryType;
 use Symfony\Component\Form\Extension\Core\Type\CurrencyType;
 use Symfony\Component\Form\Extension\Core\Type\IntegerType;
+use Symfony\Component\Form\Extension\Core\Type\TextType;
 use Symfony\Component\Form\Extension\Core\Type\TimezoneType;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\Routing\Annotation\Route;
+use Symfony\Component\Validator\Constraints\DateTime;
 use Symfony\Component\Validator\Constraints\GreaterThanOrEqual;
+use Symfony\Component\Validator\Constraints\NotNull;
+use Symfony\Component\Validator\Constraints\Regex;
 
 /**
  * Controller used for executing system relevant tasks.
@@ -84,41 +91,13 @@ class SystemConfigurationController extends AbstractController
     }
 
     /**
-     * @Route(path="/theme", name="system_configuration_theme", methods={"POST"})
+     * @Route(path="/update/{section}", name="system_configuration_update", methods={"POST"})
      *
-     * @return \Symfony\Component\HttpFoundation\Response
-     */
-    public function theme(Request $request)
-    {
-        return $this->handleConfigUpdate($request, SystemConfigurationModel::SECTION_THEME);
-    }
-
-    /**
-     * @Route(path="/timesheet", name="system_configuration_timesheet", methods={"POST"})
-     *
-     * @return \Symfony\Component\HttpFoundation\Response
-     */
-    public function timesheet(Request $request)
-    {
-        return $this->handleConfigUpdate($request, SystemConfigurationModel::SECTION_TIMESHEET);
-    }
-
-    /**
-     * @Route(path="/customer", name="system_configuration_form_customer", methods={"POST"})
-     *
-     * @return \Symfony\Component\HttpFoundation\Response
-     */
-    public function formDefaults(Request $request)
-    {
-        return $this->handleConfigUpdate($request, SystemConfigurationModel::SECTION_FORM_CUSTOMER);
-    }
-
-    /**
      * @param Request $request
      * @param string $section
      * @return \Symfony\Component\HttpFoundation\RedirectResponse|\Symfony\Component\HttpFoundation\Response
      */
-    protected function handleConfigUpdate(Request $request, string $section)
+    public function configUpdate(Request $request, string $section)
     {
         $configModel = null;
         $configSettings = $this->getInitializedConfigurations();
@@ -173,15 +152,15 @@ class SystemConfigurationController extends AbstractController
      */
     private function createConfigurationsForm(SystemConfigurationModel $configuration)
     {
-        return $this->createForm(
-            SystemConfigurationForm::class,
-            $configuration,
-            [
-                'attr' => ['id' => 'system_configuration_form_' . $configuration->getSection()],
-                'action' => $this->generateUrl('system_configuration_' . $configuration->getSection()),
-                'method' => 'POST'
-            ]
-        );
+        $options = [
+            'action' => $this->generateUrl('system_configuration_update', ['section' => $configuration->getSection()]),
+            'method' => 'POST',
+        ];
+
+        return $this->container
+            ->get('form.factory')
+            ->createNamedBuilder('system_configuration_form_' . $configuration->getSection(), SystemConfigurationForm::class, $configuration, $options)
+            ->getForm();
     }
 
     /**
@@ -192,11 +171,14 @@ class SystemConfigurationController extends AbstractController
         $types = $this->getConfigurationTypes();
 
         $event = new SystemConfigurationEvent($types);
-        $this->eventDispatcher->dispatch(SystemConfigurationEvent::CONFIGURE, $event);
+        $this->eventDispatcher->dispatch($event);
 
         foreach ($event->getConfigurations() as $configs) {
             foreach ($configs->getConfiguration() as $config) {
-                $config->setValue($this->configurations->find($config->getName()));
+                $configValue = $this->configurations->find($config->getName());
+                if (null !== $configValue) {
+                    $config->setValue($configValue);
+                }
             }
         }
 
@@ -214,11 +196,7 @@ class SystemConfigurationController extends AbstractController
                 ->setConfiguration([
                     (new Configuration())
                         ->setName('timesheet.mode')
-                        ->setType(TimesheetModeType::class)
-                        ->setTranslationDomain('system-configuration'),
-                    (new Configuration())
-                        ->setName('timesheet.markdown_content')
-                        ->setType(CheckboxType::class)
+                        ->setType(TrackingModeType::class)
                         ->setTranslationDomain('system-configuration'),
                     (new Configuration())
                         ->setName('timesheet.rules.allow_future_times')
@@ -240,12 +218,46 @@ class SystemConfigurationController extends AbstractController
                         ]),
                 ]),
             (new SystemConfigurationModel())
+                ->setSection(SystemConfigurationModel::SECTION_ROUNDING)
+                ->setConfiguration([
+                    (new Configuration())
+                        ->setName('timesheet.rounding.default.mode')
+                        ->setType(RoundingModeType::class)
+                        ->setTranslationDomain('system-configuration'),
+                    (new Configuration())
+                        ->setName('timesheet.rounding.default.begin')
+                        ->setType(IntegerType::class)
+                        ->setTranslationDomain('system-configuration')
+                        ->setConstraints([
+                            new GreaterThanOrEqual(['value' => 0])
+                        ]),
+                    (new Configuration())
+                        ->setName('timesheet.rounding.default.end')
+                        ->setType(IntegerType::class)
+                        ->setTranslationDomain('system-configuration')
+                        ->setConstraints([
+                            new GreaterThanOrEqual(['value' => 0])
+                        ]),
+                    (new Configuration())
+                        ->setName('timesheet.rounding.default.duration')
+                        ->setType(IntegerType::class)
+                        ->setTranslationDomain('system-configuration')
+                        ->setConstraints([
+                            new GreaterThanOrEqual(['value' => 0])
+                        ]),
+                    (new Configuration())
+                        ->setName('timesheet.rounding.default.days')
+                        ->setType(WeekDaysType::class)
+                        ->setTranslationDomain('system-configuration'),
+                ]),
+            (new SystemConfigurationModel())
                 ->setSection(SystemConfigurationModel::SECTION_FORM_CUSTOMER)
                 ->setConfiguration([
                     (new Configuration())
                         ->setName('defaults.customer.timezone')
                         ->setLabel('timezone')
-                        ->setType(TimezoneType::class),
+                        ->setType(TimezoneType::class)
+                        ->setValue(date_default_timezone_get()),
                     (new Configuration())
                         ->setName('defaults.customer.country')
                         ->setLabel('country')
@@ -256,13 +268,108 @@ class SystemConfigurationController extends AbstractController
                         ->setType(CurrencyType::class),
                 ]),
             (new SystemConfigurationModel())
+                ->setSection(SystemConfigurationModel::SECTION_FORM_USER)
+                ->setConfiguration([
+                    (new Configuration())
+                        ->setName('defaults.user.timezone')
+                        ->setLabel('timezone')
+                        ->setType(TimezoneType::class)
+                        ->setValue(date_default_timezone_get()),
+                    (new Configuration())
+                        ->setName('defaults.user.language')
+                        ->setLabel('language')
+                        ->setType(LanguageType::class),
+                    (new Configuration())
+                        ->setName('defaults.user.theme')
+                        ->setLabel('skin')
+                        ->setType(SkinType::class),
+                    (new Configuration())
+                        ->setName('defaults.user.currency')
+                        ->setLabel('currency')
+                        ->setType(CurrencyType::class),
+                ]),
+            (new SystemConfigurationModel())
                 ->setSection(SystemConfigurationModel::SECTION_THEME)
                 ->setConfiguration([
                     (new Configuration())
-                        ->setName('theme.select_type')
-                        ->setLabel('theme.select_type')
+                        ->setName('theme.autocomplete_chars')
+                        ->setLabel('theme.autocomplete_chars')
+                        ->setType(IntegerType::class)
+                        ->setTranslationDomain('system-configuration'),
+                    (new Configuration())
+                        ->setName('timesheet.markdown_content')
+                        ->setLabel('theme.markdown_content')
+                        ->setType(CheckboxType::class)
+                        ->setTranslationDomain('system-configuration'),
+                    // TODO should that be configurable per user?
+                    /*
+                    (new Configuration())
+                        ->setName('theme.auto_reload_datatable')
+                        ->setLabel('theme.auto_reload_datatable') // TODO translation
+                        ->setType(CheckboxType::class)
+                        ->setTranslationDomain('system-configuration'),
+                    */
+                ]),
+            (new SystemConfigurationModel())
+                ->setSection(SystemConfigurationModel::SECTION_CALENDAR)
+                ->setConfiguration([
+                    (new Configuration())
+                        ->setName('calendar.week_numbers')
                         ->setTranslationDomain('system-configuration')
-                        ->setType(EnhancedSelectboxType::class),
+                        ->setType(CheckboxType::class),
+                    (new Configuration())
+                        ->setName('calendar.weekends')
+                        ->setTranslationDomain('system-configuration')
+                        ->setType(CheckboxType::class),
+                    (new Configuration())
+                        ->setName('calendar.businessHours.begin')
+                        ->setTranslationDomain('system-configuration')
+                        ->setType(TextType::class)
+                        ->setConstraints([new DateTime(['format' => 'H:i']), new NotNull()]),
+                    (new Configuration())
+                        ->setName('calendar.businessHours.end')
+                        ->setTranslationDomain('system-configuration')
+                        ->setType(TextType::class)
+                        ->setConstraints([new DateTime(['format' => 'H:i']), new NotNull()]),
+                    (new Configuration())
+                        ->setName('calendar.visibleHours.begin')
+                        ->setTranslationDomain('system-configuration')
+                        ->setType(TextType::class)
+                        ->setConstraints([new DateTime(['format' => 'H:i']), new NotNull()]),
+                    (new Configuration())
+                        ->setName('calendar.visibleHours.end')
+                        ->setTranslationDomain('system-configuration')
+                        ->setType(TextType::class)
+                        ->setConstraints([new DateTime(['format' => 'H:i']), new NotNull()]),
+                    (new Configuration())
+                        ->setName('calendar.slot_duration')
+                        ->setTranslationDomain('system-configuration')
+                        ->setType(TextType::class)
+                        ->setConstraints([new Regex(['pattern' => '/[0-2]{1}[0-9]{1}:[0-9]{2}:[0-9]{2}/']), new NotNull()]),
+                ]),
+            (new SystemConfigurationModel())
+                ->setSection(SystemConfigurationModel::SECTION_BRANDING)
+                ->setConfiguration([
+                    (new Configuration())
+                        ->setName('theme.branding.logo')
+                        ->setTranslationDomain('system-configuration')
+                        ->setRequired(false)
+                        ->setType(TextType::class),
+                    (new Configuration())
+                        ->setName('theme.branding.company')
+                        ->setTranslationDomain('system-configuration')
+                        ->setRequired(false)
+                        ->setType(TextType::class),
+                    (new Configuration())
+                        ->setName('theme.branding.mini')
+                        ->setTranslationDomain('system-configuration')
+                        ->setRequired(false)
+                        ->setType(TextType::class),
+                    (new Configuration())
+                        ->setName('theme.branding.title')
+                        ->setTranslationDomain('system-configuration')
+                        ->setRequired(false)
+                        ->setType(TextType::class),
                 ]),
         ];
     }

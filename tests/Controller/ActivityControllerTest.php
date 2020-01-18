@@ -9,14 +9,17 @@
 
 namespace App\Tests\Controller;
 
+use App\Entity\Activity;
+use App\Entity\ActivityMeta;
 use App\Entity\Timesheet;
 use App\Entity\User;
 use App\Tests\DataFixtures\ActivityFixtures;
 use App\Tests\DataFixtures\ProjectFixtures;
 use App\Tests\DataFixtures\TimesheetFixtures;
+use App\Tests\Mocks\ActivityTestMetaFieldSubscriberMock;
+use Doctrine\ORM\EntityManager;
 
 /**
- * @coversDefaultClass \App\Controller\ActivityController
  * @group integration
  */
 class ActivityControllerTest extends ControllerBaseTest
@@ -24,14 +27,61 @@ class ActivityControllerTest extends ControllerBaseTest
     public function testIsSecure()
     {
         $this->assertUrlIsSecured('/admin/activity/');
-        $this->assertUrlIsSecuredForRole(User::ROLE_TEAMLEAD, '/admin/activity/');
+        $this->assertUrlIsSecuredForRole(User::ROLE_USER, '/admin/activity/');
     }
 
     public function testIndexAction()
     {
-        $client = $this->getClientForAuthenticatedUser(User::ROLE_ADMIN);
+        $client = $this->getClientForAuthenticatedUser(User::ROLE_TEAMLEAD);
         $this->assertAccessIsGranted($client, '/admin/activity/');
         $this->assertHasDataTable($client);
+    }
+
+    public function testIndexActionWithSearchTermQuery()
+    {
+        $client = $this->getClientForAuthenticatedUser(User::ROLE_ADMIN);
+        $em = $client->getContainer()->get('doctrine.orm.entity_manager');
+        $fixture = new ActivityFixtures();
+        $fixture->setAmount(5);
+        $fixture->setCallback(function (Activity $activity) {
+            $activity->setVisible(true);
+            $activity->setComment('I am a foobar with tralalalala some more content');
+            $activity->setMetaField((new ActivityMeta())->setName('location')->setValue('homeoffice'));
+            $activity->setMetaField((new ActivityMeta())->setName('feature')->setValue('timetracking'));
+        });
+        $this->importFixture($em, $fixture);
+
+        $client = $this->getClientForAuthenticatedUser(User::ROLE_ADMIN);
+        $this->assertAccessIsGranted($client, '/admin/activity/');
+
+        $form = $client->getCrawler()->filter('form.header-search')->form();
+        $client->submit($form, [
+            'searchTerm' => 'feature:timetracking foo',
+            'visibility' => 1,
+            'pageSize' => 50,
+            'page' => 1,
+        ]);
+
+        $this->assertTrue($client->getResponse()->isSuccessful());
+        $this->assertHasDataTable($client);
+        $this->assertDataTableRowCount($client, 'datatable_activity_admin', 5);
+    }
+
+    public function testBudgetAction()
+    {
+        $client = $this->getClientForAuthenticatedUser(User::ROLE_ADMIN);
+        /** @var EntityManager $em */
+        $em = $client->getContainer()->get('doctrine.orm.entity_manager');
+
+        $fixture = new TimesheetFixtures();
+        $fixture->setAmount(10);
+        $fixture->setActivities($em->getRepository(Activity::class)->findAll());
+        $fixture->setUser($this->getUserByRole($em, User::ROLE_ADMIN));
+        $this->importFixture($em, $fixture);
+
+        $client = $this->getClientForAuthenticatedUser(User::ROLE_ADMIN);
+        $this->assertAccessIsGranted($client, '/admin/activity/1/budget');
+        self::assertHasProgressbar($client);
     }
 
     public function testCreateAction()
@@ -40,7 +90,7 @@ class ActivityControllerTest extends ControllerBaseTest
         $this->assertAccessIsGranted($client, '/admin/activity/create');
         $form = $client->getCrawler()->filter('form[name=activity_edit_form]')->form();
         $this->assertTrue($form->has('activity_edit_form[create_more]'));
-        $this->assertNull($form->get('activity_edit_form[create_more]')->getValue());
+        $this->assertFalse($form->get('activity_edit_form[create_more]')->hasValue());
         $client->submit($form, [
             'activity_edit_form' => [
                 'name' => 'An AcTiVitY Name',
@@ -59,10 +109,23 @@ class ActivityControllerTest extends ControllerBaseTest
         $this->assertEquals('1', $editForm->get('activity_edit_form[customer]')->getValue());
     }
 
+    public function testCreateActionShowsMetaFields()
+    {
+        $client = $this->getClientForAuthenticatedUser(User::ROLE_ADMIN);
+        $client->getContainer()->get('event_dispatcher')->addSubscriber(new ActivityTestMetaFieldSubscriberMock());
+        $this->assertAccessIsGranted($client, '/admin/activity/create');
+        $this->assertTrue($client->getResponse()->isSuccessful());
+
+        $form = $client->getCrawler()->filter('form[name=activity_edit_form]')->form();
+        $this->assertTrue($form->has('activity_edit_form[metaFields][0][value]'));
+        $this->assertFalse($form->has('activity_edit_form[metaFields][1][value]'));
+    }
+
     public function testCreateActionWithCreateMore()
     {
         $client = $this->getClientForAuthenticatedUser(User::ROLE_ADMIN);
 
+        /** @var EntityManager $em */
         $em = $client->getContainer()->get('doctrine.orm.entity_manager');
         $fixture = new ProjectFixtures();
         $fixture->setAmount(10);
@@ -88,6 +151,7 @@ class ActivityControllerTest extends ControllerBaseTest
         $this->assertTrue($client->getResponse()->isSuccessful());
         $form = $client->getCrawler()->filter('form[name=activity_edit_form]')->form();
         $this->assertTrue($form->has('activity_edit_form[create_more]'));
+        $this->assertTrue($form->get('activity_edit_form[create_more]')->hasValue());
         $this->assertEquals(1, $form->get('activity_edit_form[create_more]')->getValue());
         $this->assertEquals($selectedProject, $form->get('activity_edit_form[project]')->getValue());
     }
@@ -158,6 +222,7 @@ class ActivityControllerTest extends ControllerBaseTest
     {
         $client = $this->getClientForAuthenticatedUser(User::ROLE_ADMIN);
 
+        /** @var EntityManager $em */
         $em = $client->getContainer()->get('doctrine.orm.entity_manager');
         $fixture = new TimesheetFixtures();
         $fixture->setUser($this->getUserByRole($em, User::ROLE_USER));
@@ -197,6 +262,7 @@ class ActivityControllerTest extends ControllerBaseTest
     {
         $client = $this->getClientForAuthenticatedUser(User::ROLE_ADMIN);
 
+        /** @var EntityManager $em */
         $em = $client->getContainer()->get('doctrine.orm.entity_manager');
         $fixture = new TimesheetFixtures();
         $fixture->setUser($this->getUserByRole($em, User::ROLE_USER));

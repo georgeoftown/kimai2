@@ -22,6 +22,7 @@ class UserVoter extends AbstractVoter
     public const DELETE = 'delete';
     public const PASSWORD = 'password';
     public const ROLES = 'roles';
+    public const TEAMS = 'teams';
     public const PREFERENCES = 'preferences';
     public const API_TOKEN = 'api-token';
     public const HOURLY_RATE = 'hourly-rate';
@@ -30,6 +31,7 @@ class UserVoter extends AbstractVoter
         self::VIEW,
         self::EDIT,
         self::ROLES,
+        self::TEAMS,
         self::PASSWORD,
         self::DELETE,
         self::PREFERENCES,
@@ -80,19 +82,13 @@ class UserVoter extends AbstractVoter
 
                 return $this->hasRolePermission($user, 'delete_user');
 
-            // used in templates and ProfileController
             case self::VIEW:
             case self::EDIT:
-            case self::PASSWORD:
             case self::PREFERENCES:
-                // always allow the user to edit these own settings
-                if ($subject->getId() === $user->getId()) {
-                    return true;
-                }
-                // no break on purpose
-
+            case self::PASSWORD:
             case self::API_TOKEN:
             case self::ROLES:
+            case self::TEAMS:
             case self::HOURLY_RATE:
                 $permission .= $attribute;
                 break;

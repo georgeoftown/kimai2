@@ -1,36 +1,136 @@
 # Upgrading Kimai 2
 
-_Database upgrades are currently ONLY provided for MySQL/MariaDB and SQLite._ 
+_Make sure to create a backup before you start!_ 
 
-Upgrading to the latest available version can be achieved with these commands: 
+Read the [updates documentation](https://www.kimai.org/documentation/updates.html) to find out how 
+you can upgrade your Kimai installation to the latest stable release.
 
-```bash
-git fetch --tags
-git checkout 0.8
-sudo -u www-data composer install --no-dev --optimize-autoloader
-sudo -u www-data bin/console cache:clear --env=prod
-sudo -u www-data bin/console cache:warmup --env=prod
-bin/console doctrine:migrations:migrate
-```
+Check below if there are more version specific steps required, which need to be executed after the normal update process.
+Perform EACH version specific task between your version and the new one, otherwise you risk data inconsistency or a broken installation.
 
-There might be more steps required which are version specific and need to be executed after following the above list of commands.
-Read and follow each version info below, otherwise you risk data inconsistency or a broken installation!
+## [1.7](https://github.com/kevinpapst/kimai2/releases/tag/1.7)
 
-And make sure to **create a backup before you start**.
+**New database tables and fields were created, don't forget to [run the updater](https://www.kimai.org/documentation/updates.html).**
 
-## 1.0 (unreleased)
+New permissions:
 
-Follow the normal update and database migration process (see above).
+- `comments_customer` - show comment list on customer detail page (new feature) 
+- `details_customer` - show detail information for customers (customer number, vat, rates, meta-fields, assigned teams ...)
+- `comments_project` - show comment list on project detail page (new feature) 
+- `details_project` - show detail information for projects (rates, meta-fields, assigned teams ...)
 
-### Apply necessary changes to your `local.yaml`:
+If you are using teams, please read on: The following list of permissions are now also available in the UI and they (can) replace the `X_project` and `X_customer` permissions. 
+They are more strict, as they allow only access to team specific items, the older permissions without `_teamlead_`/`_team_` work on a global level instead.
+  
+- `view_teamlead_customer`, `edit_teamlead_customer`, `budget_teamlead_customer`, `permissions_teamlead_customer`, `comments_teamlead_customer`, `details_teamlead_customer` - allows access to customer data when user is teamlead of a team assigned to the customer (replaces more global permission like `view_customer` for teamleads)
+- `view_team_customer`, `edit_team_customer`, `budget_team_customer`, `comments_team_customer`, `details_team_customer` - allows access to customer data when user is member of a team assigned to the customer (replaces more global permission like `view_customer` for users)
+- `view_teamlead_project`, `edit_teamlead_project`, `budget_teamlead_project`, `permissions_teamlead_project`, `comments_teamlead_project`, `details_teamlead_project` - allows access to customer data when user is teamlead of a team assigned to the project (replaces more global permission like `view_project` for teamleads)
+- `view_team_project`, `edit_team_project`, `budget_team_project`, `comments_team_project`, `details_team_project` - allows access to customer data when user is member of a team assigned to the project (replaces more global permission like `view_project` for users)
+
+### ExpenseBundle
+
+**ATTENTION** due to incompatibilities in the underlying frameworks users of the ExpenseBundle need to do one more step:
+
+You need to delete the bundle before updating: `rm -r var/plugins/ExpenseBundle`, otherwise you will run into errors during the update.
+
+After the Kimai update was successful, you have to re-install the latest bundle version, which is compatible with Kimai 1.7 only. 
+
+### Developer
+
+- Projects now have a start and end date and the API will only return those, which are either unconfigured or currently active, you might want to reload the list of projects once the user entered begin and end datetime OR use the new `ignoreDates` parameter.
+- Doctrine bundle was updated to v2, check your code for [the usage of RegistryInterface and ObjectManager](https://github.com/doctrine/DoctrineBundle/blob/master/UPGRADE-2.0.md)
+- Removed the webserver bundle and the command `server:run` - see [docs](https://www.kimai.org/documentation/developers.html)
+
+## [1.6](https://github.com/kevinpapst/kimai2/releases/tag/1.6), [1.6.1](https://github.com/kevinpapst/kimai2/releases/tag/1.6.1), [1.6.2](https://github.com/kevinpapst/kimai2/releases/tag/1.6.2)
+
+**New database tables and fields were created, don't forget to [run the updater](https://www.kimai.org/documentation/updates.html).**
+
+- Invoice changes:
+  - Moved CSV, ODS and XSLX invoice templates to [another repository](https://github.com/Keleo/kimai2-invoice-templates). Using them? Install them manually (see [invoice documentation](https://www.kimai.org/documentation/invoices.html)).
+  - Added new invoice fields (VAT, contact, payment details) and customer field (VAT). Used the twig settings before? Move them to the respective invoice template settings.
+- Permissions can be managed via Admin UI. Please move your permission settings from [local.yaml to your database](https://www.kimai.org/documentation/permissions.html).
+- Important permission change: regular users with the `view_other_timesheet` permission could see all timesheets. This was a legacy from the time before team permissions were introduced. If you rely on this behavior, you need to create a team with all users and the teamlead being the user who needs access to all timesheets. 
+
+### Developer
+
+Please add default permissions to your [plugin](https://www.kimai.org/documentation/plugins.html).
+
+## [1.5](https://github.com/kevinpapst/kimai2/releases/tag/1.5)
+
+[Update as usual](https://www.kimai.org/documentation/updates.html)
+
+## [1.4](https://github.com/kevinpapst/kimai2/releases/tag/1.4)
+
+**There is a new directory, which needs to be writable by the webserver: `public/avatars/`.**
+
+New permission (used in new dashboard widget):
+- `view_team_member` - display team assignments (names, teamleads and members) for the current user
+
+Activated Javascript select component by default (check mobile devices).
+
+### Developer: BC breaks
+
+- Dashboard widgets and rows need to define their `type` by FQCN
+- Switched to Symfony 4.3 event types, this could fail in plugins, but only if they didn't use the official constants for event names
+
+## [1.3](https://github.com/kevinpapst/kimai2/releases/tag/1.3)
+
+Added `manage_tag` permission for new tag features
+
+### Developer: BC breaks
+
+- Refactored toolbars and search, plugins needs to be checked 
+- Invoices now supports multiple repositories, some method signatures had to be changed (eg. `calculateSumIdentifier()`)  
+
+## [1.2](https://github.com/kevinpapst/kimai2/releases/tag/1.2)
+
+**If you are still using 0.7 or below, you need to upgrade to 1.1 before upgrading to this version.**
+
+- Deleted timezone conversion command. 
+- Minimum password length raised from 5 to 8 character (applies only for password changes and new users)
+- Maximum customer name length lowered to 150 character
+- Maximum project name length lowered to 150 character
+- Maximum activity name length lowered to 150 character
+- Added new permission: `manage_invoice_template`
+  - Removed permissions: `view_invoice_template`, `create_invoice_template`, `edit_invoice_template`, `delete_invoice_template`
+- Removed permission: `view_export` (using `create_export` only)
+
+### Developer: BC breaks
+
+- Custom export renderer need to check for usage of `Timesheet::getEnd()` as running entries can now be exported as well
+
+## [1.1](https://github.com/kevinpapst/kimai2/releases/tag/1.1)
+
+[Update as usual](https://www.kimai.org/documentation/updates.html), nothing special for this release if you upgrade from 1.0 / 1.0.1.
+
+## [1.0](https://github.com/kevinpapst/kimai2/releases/tag/1.0)
+
+This release contains several changes, as I still have the goal to stabilize the code base to prevent 
+such "challenges" after 1.0 for a while.
+
+### Changes for your local.yaml
  
-New permissions are available: 
+New permissions are available. You have to add them to your `local.yaml` ONLY if you use a custom permission structure, 
+otherwise you can't use the new features: 
 - `view_tag` - view all tags
 - `delete_tag` - delete tags
+- `edit_exported_timesheet` - allows to edit records which were exported
+- `role_permissions` - view calculated permissions for user roles
+- `budget_activity` - view and edit budgets for activities
+- `budget_project` - view and edit budgets for projects
+- `budget_customer` - view and edit budgets for customers
+
+Removed permission:
+- `system_actions` - removed experimental feature to flush app cache from the about screen
+
+### BC BREAKS
+
+- API: Format for queries including a datetime object fixed to use HTML5 format (previously `2019-03-02 14:23` - now `2019-03-02T14:23:00`)
+- **Permission config**: the `permissions` definition in your `local.yaml` needs to be verified/changed, as the internal structure was highly optimized to simplify the definition. 
+Thanks to the new structure, you should be able to remove almost everything from your `local.yaml` (tip: start over from scratch!). Please read [the updated permission docu](https://www.kimai.org/documentation/permissions.html). 
+- default widgets were removed from `kimai.yaml`, that shouldn't cause any issues ... but if something is odd: [look here for help](https://www.kimai.org/documentation/dashboard.html)
 
 ## [0.9](https://github.com/kevinpapst/kimai2/releases/tag/0.9)
-
-Follow the normal update and database migration process (see above).
 
 Remember to execute the necessary timezone conversion script, if you haven't updated to 0.8 before (see below)!
 

@@ -10,8 +10,12 @@
 namespace App\Controller;
 
 use App\Event\DashboardEvent;
-use App\Model\DashboardSection;
-use App\Repository\WidgetRepository;
+use App\Widget\Type\AbstractContainer;
+use App\Widget\Type\AuthorizedWidget;
+use App\Widget\Type\CompoundRow;
+use App\Widget\WidgetContainerInterface;
+use App\Widget\WidgetException;
+use App\Widget\WidgetService;
 use Sensio\Bundle\FrameworkExtraBundle\Configuration\Security;
 use Symfony\Component\EventDispatcher\EventDispatcherInterface;
 use Symfony\Component\Routing\Annotation\Route;
@@ -20,7 +24,7 @@ use Symfony\Component\Routing\Annotation\Route;
  * Dashboard controller for the admin area.
  *
  * @Route(path="/dashboard")
- * @Security("is_granted('ROLE_USER')")
+ * @Security("is_granted('IS_AUTHENTICATED_REMEMBERED')")
  */
 class DashboardController extends AbstractController
 {
@@ -29,9 +33,9 @@ class DashboardController extends AbstractController
      */
     protected $eventDispatcher;
     /**
-     * @var WidgetRepository
+     * @var WidgetService
      */
-    protected $repository;
+    protected $widgets;
     /**
      * @var array
      */
@@ -39,13 +43,13 @@ class DashboardController extends AbstractController
 
     /**
      * @param EventDispatcherInterface $dispatcher
-     * @param WidgetRepository $repository
+     * @param WidgetService $service
      * @param array $dashboard
      */
-    public function __construct(EventDispatcherInterface $dispatcher, WidgetRepository $repository, array $dashboard)
+    public function __construct(EventDispatcherInterface $dispatcher, WidgetService $service, array $dashboard)
     {
         $this->eventDispatcher = $dispatcher;
-        $this->repository = $repository;
+        $this->widgets = $service;
         $this->dashboard = $dashboard;
     }
 
@@ -61,37 +65,73 @@ class DashboardController extends AbstractController
                 continue;
             }
 
-            if (!$this->isGranted($widgetRow['permission'])) {
+            if (null !== $widgetRow['permission'] && !$this->isGranted($widgetRow['permission'])) {
                 continue;
             }
 
-            $row = new DashboardSection($widgetRow['title'] ?? null);
-            $row
-                ->setOrder($widgetRow['order'])
-                ->setType($widgetRow['type'])
-            ;
+            if (!isset($widgetRow['type'])) {
+                $widgetRow['type'] = CompoundRow::class;
+            }
+
+            if (!class_exists($widgetRow['type'])) {
+                throw new WidgetException(sprintf('Unknown widget type "%s"', $widgetRow['type']));
+            }
+
+            $row = new $widgetRow['type']();
+            if (!($row instanceof AbstractContainer)) {
+                throw new WidgetException(
+                    sprintf(
+                        'Expected widget type to be an instanceof "%s", but found "%s"',
+                        AbstractContainer::class,
+                        $widgetRow['type']
+                    )
+                );
+            }
+
+            $row->setTitle($widgetRow['title'] ?? '');
+            $row->setOrder($widgetRow['order']);
 
             foreach ($widgetRow['widgets'] as $widgetName) {
-                if (!$this->repository->has($widgetName)) {
-                    throw new \Exception('Unknwon widget: ' . $widgetName);
+                if (!$this->widgets->hasWidget($widgetName)) {
+                    throw new \Exception(sprintf('Unknown widget "%s"', $widgetName));
                 }
 
-                $row->addWidget($this->repository->get($widgetName, $event->getUser()));
+                $widget = $this->widgets->getWidget($widgetName);
+
+                $add = true;
+                if ($widget instanceof AuthorizedWidget) {
+                    $tmp = false;
+                    foreach ($widget->getPermissions() as $perm) {
+                        if ($this->isGranted($perm)) {
+                            $tmp = true;
+                            break;
+                        }
+                    }
+                    $add = $tmp;
+                }
+
+                if ($add) {
+                    $row->addWidget($widget);
+                }
             }
 
             $event->addSection($row);
         }
 
-        $this->eventDispatcher->dispatch(
-            DashboardEvent::DASHBOARD,
-            $event
-        );
+        $this->eventDispatcher->dispatch($event);
 
         $sections = $event->getSections();
+        $clearedSections = [];
+        /** @var WidgetContainerInterface $section */
+        foreach ($sections as $key => $section) {
+            if (!empty($section->getWidgets())) {
+                $clearedSections[] = $section;
+            }
+        }
 
         uasort(
-            $sections,
-            function (DashboardSection $a, DashboardSection $b) {
+            $clearedSections,
+            function (WidgetContainerInterface $a, WidgetContainerInterface $b) {
                 if ($a->getOrder() == $b->getOrder()) {
                     return 0;
                 }
@@ -101,7 +141,7 @@ class DashboardController extends AbstractController
         );
 
         return $this->render('dashboard/index.html.twig', [
-            'widget_rows' => $sections
+            'widgets' => $clearedSections
         ]);
     }
 }

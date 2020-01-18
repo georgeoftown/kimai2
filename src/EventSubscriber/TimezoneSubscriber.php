@@ -10,9 +10,8 @@
 namespace App\EventSubscriber;
 
 use App\Entity\User;
-use KevinPapst\AdminLTEBundle\Event\ShowUserEvent;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
-use Symfony\Component\HttpKernel\Event\GetResponseEvent;
+use Symfony\Component\HttpKernel\Event\RequestEvent;
 use Symfony\Component\HttpKernel\KernelEvents;
 use Symfony\Component\Security\Core\Authentication\Token\Storage\TokenStorageInterface;
 
@@ -23,17 +22,11 @@ class TimezoneSubscriber implements EventSubscriberInterface
      */
     protected $storage;
 
-    /**
-     * @param TokenStorageInterface $tokenStorage
-     */
     public function __construct(TokenStorageInterface $tokenStorage)
     {
         $this->storage = $tokenStorage;
     }
 
-    /**
-     * @return array
-     */
     public static function getSubscribedEvents(): array
     {
         return [
@@ -41,37 +34,20 @@ class TimezoneSubscriber implements EventSubscriberInterface
         ];
     }
 
-    /**
-     * @param ShowUserEvent $event
-     */
-    public function setTimezone(GetResponseEvent $event)
+    public function setTimezone(RequestEvent $event)
     {
-        if (!$this->canHandleEvent()) {
+        if (null === $this->storage->getToken()) {
             return;
         }
 
-        /* @var $user User */
-        $user = $this->storage->getToken()->getUser();
-        $timezone = $user->getPreferenceValue('timezone', date_default_timezone_get());
-        date_default_timezone_set($timezone);
-    }
-
-    /**
-     * @return bool
-     */
-    protected function canHandleEvent(): bool
-    {
-        if (null === $this->storage->getToken()) {
-            return false;
-        }
-
-        /* @var $user User */
         $user = $this->storage->getToken()->getUser();
 
         if (null === $user) {
-            return false;
+            return;
         }
 
-        return ($user instanceof User);
+        if ($user instanceof User) {
+            date_default_timezone_set($user->getTimezone());
+        }
     }
 }

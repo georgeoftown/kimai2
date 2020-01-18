@@ -21,14 +21,14 @@ abstract class AbstractRepositoryTest extends KernelTestCase
     use KernelTestTrait;
 
     /**
-     * @var EntityManager
+     * @var EntityManager|null
      */
     private $entityManager;
 
     /**
      * {@inheritdoc}
      */
-    protected function setUp()
+    protected function setUp(): void
     {
         $kernel = self::bootKernel();
 
@@ -48,7 +48,7 @@ abstract class AbstractRepositoryTest extends KernelTestCase
     /**
      * {@inheritdoc}
      */
-    protected function tearDown()
+    protected function tearDown(): void
     {
         parent::tearDown();
 

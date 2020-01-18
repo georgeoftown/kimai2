@@ -9,34 +9,19 @@
 
 namespace App\Repository\Query;
 
-use App\Entity\Customer;
-
 /**
  * Can be used for advanced queries with the: CustomerRepository
  */
-class CustomerQuery extends VisibilityQuery
+class CustomerQuery extends BaseQuery implements VisibilityInterface
 {
-    /**
-     * @var array
-     */
-    protected $ignored = [];
+    use VisibilityTrait;
 
-    /**
-     * @param Customer|int $customer
-     * @return $this
-     */
-    public function addIgnoredEntity($customer)
+    public const CUSTOMER_ORDER_ALLOWED = ['id', 'name', 'comment', 'country', 'number'];
+
+    public function __construct()
     {
-        $this->ignored[] = $customer;
-
-        return $this;
-    }
-
-    /**
-     * @return array
-     */
-    public function getIgnoredEntities()
-    {
-        return $this->ignored;
+        $this->setDefaults([
+            'orderBy' => 'name',
+        ]);
     }
 }

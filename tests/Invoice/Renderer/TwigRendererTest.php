@@ -10,15 +10,19 @@
 namespace App\Tests\Invoice\Renderer;
 
 use App\Invoice\Renderer\TwigRenderer;
+use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 use Symfony\Component\HttpFoundation\Request;
 use Twig\Environment;
 use Twig\Loader\FilesystemLoader;
 
 /**
  * @covers \App\Invoice\Renderer\TwigRenderer
+ * @group integration
  */
-class TwigRendererTest extends AbstractRendererTest
+class TwigRendererTest extends KernelTestCase
 {
+    use RendererTestTrait;
+
     public function testSupports()
     {
         $loader = new FilesystemLoader();
@@ -58,9 +62,9 @@ class TwigRendererTest extends AbstractRendererTest
 
         $content = $response->getContent();
 
-        $this->assertContains('<h2 class="page-header">
-           <span contenteditable="true">a test invoice template title</span>
+        $this->assertStringContainsString('<h2 class="page-header">
+           <span contenteditable="true">a very *long* test invoice / template title with [special] character</span>
         </h2>', $content);
-        $this->assertEquals(5, substr_count($content, 'activity description / project name'));
+        $this->assertEquals(5, substr_count($content, 'activity description'));
     }
 }

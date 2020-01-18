@@ -10,6 +10,7 @@
 namespace App\Tests\Voter;
 
 use App\Entity\User;
+use App\Repository\RolePermissionRepository;
 use App\Security\AclDecisionManager;
 use App\Security\RolePermissionManager;
 use App\Voter\AbstractVoter;
@@ -28,30 +29,34 @@ abstract class AbstractVoterTest extends TestCase
         $isAuthenticated = empty($user->getRoles());
         $accessManager = $this->getMockBuilder(AclDecisionManager::class)->disableOriginalConstructor()->getMock();
         $accessManager->method('isFullyAuthenticated')->willReturn($isAuthenticated);
-        $accessManager->method('hasRole')->willReturnCallback(function ($role) use ($user) {
-            return in_array($role, $user->getRoles());
-        });
 
         $class = new \ReflectionClass($voterClass);
+        /** @var AbstractVoter $voter */
+        $voter = $class->newInstance($accessManager, $this->getRolePermissionManager());
+        self::assertInstanceOf(AbstractVoter::class, $voter);
 
-        return $class->newInstance($accessManager, $this->getRolePermissionManager());
+        return $voter;
     }
 
     /**
-     * @param $id
-     * @param $role
+     * @param int $id
+     * @param string|null $role
      * @return User
      */
-    protected function getUser($id, $role)
+    protected function getUser($id, ?string $role)
     {
         $roles = [];
         if (!empty($role)) {
             $roles[] = $role;
         }
 
-        $user = $this->getMockBuilder(User::class)->getMock();
-        $user->method('getId')->willReturn($id);
-        $user->method('getRoles')->willReturn($roles);
+        $user = new User();
+        $user->setRoles($roles);
+
+        $reflection = new \ReflectionClass($user);
+        $property = $reflection->getProperty('id');
+        $property->setAccessible(true);
+        $property->setValue($user, $id);
 
         return $user;
     }
@@ -64,32 +69,40 @@ abstract class AbstractVoterTest extends TestCase
     protected function getRolePermissionManager(array $permissions = [], bool $overwrite = false)
     {
         if (!$overwrite) {
-            $activities = ['view_activity', 'edit_activity', 'delete_activity', 'create_activity'];
-            $projects = ['view_project', 'edit_project', 'delete_project', 'create_project'];
-            $customers = ['view_customer', 'edit_customer', 'delete_customer', 'create_customer'];
+            $activities = ['view_activity', 'edit_activity', 'budget_activity', 'delete_activity', 'create_activity'];
+            $activitiesTeam = ['view_activity', 'create_activity', 'edit_teamlead_activity', 'budget_teamlead_activity'];
+            $projects = ['view_project', 'create_project', 'edit_project', 'budget_project', 'delete_project', 'permissions_project', 'comments_project', 'details_project'];
+            $projectsTeam = ['view_teamlead_project', 'edit_teamlead_project', 'budget_teamlead_project', 'permissions_teamlead_project', 'comments_teamlead_project', 'details_teamlead_project'];
+            $customers = ['view_customer', 'create_customer', 'edit_customer', 'budget_customer', 'delete_customer', 'permissions_customer', 'comments_customer', 'details_customer'];
+            $customersTeam = ['view_teamlead_customer', 'edit_teamlead_customer', 'budget_teamlead_customer', 'comments_teamlead_customer', 'details_teamlead_customer'];
             $invoice = ['view_invoice', 'create_invoice'];
-            $invoiceTemplate = ['view_invoice_template', 'create_invoice_template', 'edit_invoice_template', 'delete_invoice_template'];
+            $invoiceTemplate = ['manage_invoice_template'];
             $timesheet = ['view_own_timesheet', 'start_own_timesheet', 'stop_own_timesheet', 'create_own_timesheet', 'edit_own_timesheet', 'export_own_timesheet', 'delete_own_timesheet'];
             $timesheetOthers = ['view_other_timesheet', 'start_other_timesheet', 'stop_other_timesheet', 'create_other_timesheet', 'edit_other_timesheet',  'export_other_timesheet', 'delete_other_timesheet'];
             $profile = ['view_own_profile', 'edit_own_profile', 'password_own_profile', 'preferences_own_profile', 'api-token_own_profile'];
-            $profileOther = ['view_other_profile', 'edit_other_profile', 'delete_other_profile', 'password_other_profile', 'roles_other_profile', 'preferences_other_profile', 'api-token_other_profile'];
+            $profileOther = ['view_other_profile', 'edit_other_profile', 'password_other_profile', 'roles_other_profile', 'preferences_other_profile', 'api-token_other_profile'];
             $user = ['view_user', 'create_user', 'delete_user'];
             $rate = ['view_rate_own_timesheet', 'edit_rate_own_timesheet'];
             $rateOther = ['view_rate_other_timesheet', 'edit_rate_other_timesheet'];
+            $teams = ['view_team', 'create_team', 'edit_team', 'delete_team'];
 
-            $roleUser = [];
+            $roleUser = ['edit_team_activity', 'edit_team_project', 'edit_team_customer'];
             $roleTeamlead = ['view_rate_own_timesheet', 'view_rate_other_timesheet', 'hourly-rate_own_profile'];
-            $roleAdmin = ['hourly-rate_own_profile'];
-            $roleSuperAdmin = ['hourly-rate_own_profile', 'hourly-rate_other_profile', 'delete_own_profile', 'roles_own_profile'];
+            $roleAdmin = ['hourly-rate_own_profile', 'edit_exported_timesheet'];
+            $roleSuperAdmin = ['hourly-rate_own_profile', 'hourly-rate_other_profile', 'roles_own_profile', 'system_information', 'system_configuration', 'plugins', 'edit_exported_timesheet'];
 
             $permissions = [
                 'ROLE_USER' => array_merge($timesheet, $profile, $roleUser),
-                'ROLE_TEAMLEAD' => array_merge($invoice, $timesheet, $timesheetOthers, $profile, $roleTeamlead),
-                'ROLE_ADMIN' => array_merge($activities, $projects, $customers, $invoice, $invoiceTemplate, $timesheet, $timesheetOthers, $profile, $rate, $rateOther, $roleAdmin),
-                'ROLE_SUPER_ADMIN' => array_merge($activities, $projects, $customers, $invoice, $invoiceTemplate, $timesheet, $timesheetOthers, $profile, $profileOther, $user, $rate, $rateOther, $roleSuperAdmin),
+                'ROLE_TEAMLEAD' => array_merge($invoice, $timesheet, $timesheetOthers, $profile, $roleTeamlead, $activitiesTeam, $projectsTeam, $customersTeam),
+                'ROLE_ADMIN' => array_merge($activities, $projects, $customers, $invoice, $invoiceTemplate, $timesheet, $timesheetOthers, $profile, $rate, $rateOther, $roleAdmin, $teams),
+                'ROLE_SUPER_ADMIN' => array_merge($activities, $projects, $customers, $invoice, $invoiceTemplate, $timesheet, $timesheetOthers, $profile, $profileOther, $user, $rate, $rateOther, $roleSuperAdmin, $teams),
             ];
         }
 
-        return new RolePermissionManager($permissions);
+        $repository = $this->getMockBuilder(RolePermissionRepository::class)->onlyMethods(['getAllAsArray'])->disableOriginalConstructor()->getMock();
+        $repository->method('getAllAsArray')->willReturn([]);
+
+        /* @var RolePermissionRepository $repository */
+        return new RolePermissionManager($repository, $permissions);
     }
 }

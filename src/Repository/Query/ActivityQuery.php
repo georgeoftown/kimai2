@@ -16,36 +16,27 @@ use App\Entity\Project;
  */
 class ActivityQuery extends ProjectQuery
 {
+    public const ACTIVITY_ORDER_ALLOWED = ['id', 'name', 'comment', 'customer', 'project'];
+
     /**
-     * @var Project|int
+     * @var Project|int|null
      */
-    protected $project;
+    private $project;
     /**
      * @var bool
      */
-    protected $orderGlobalsFirst = false;
+    private $globalsOnly = false;
     /**
      * @var bool
      */
-    protected $globalsOnly = false;
+    private $excludeGlobals = false;
 
-    /**
-     * @return bool
-     */
-    public function isOrderGlobalsFirst(): bool
+    public function __construct()
     {
-        return $this->orderGlobalsFirst;
-    }
-
-    /**
-     * @param bool $orderGlobalsFirst
-     * @return ActivityQuery
-     */
-    public function setOrderGlobalsFirst(bool $orderGlobalsFirst)
-    {
-        $this->orderGlobalsFirst = $orderGlobalsFirst;
-
-        return $this;
+        parent::__construct();
+        $this->setDefaults([
+            'orderBy' => 'name',
+        ]);
     }
 
     /**
@@ -58,17 +49,29 @@ class ActivityQuery extends ProjectQuery
 
     /**
      * @param bool $globalsOnly
-     * @return ActivityQuery
+     * @return self
      */
-    public function setGlobalsOnly($globalsOnly)
+    public function setGlobalsOnly($globalsOnly): self
     {
-        $this->globalsOnly = $globalsOnly;
+        $this->globalsOnly = (bool) $globalsOnly;
+
+        return $this;
+    }
+
+    public function isExcludeGlobals(): bool
+    {
+        return (bool) $this->excludeGlobals;
+    }
+
+    public function setExcludeGlobals(bool $excludeGlobals): self
+    {
+        $this->excludeGlobals = (bool) $excludeGlobals;
 
         return $this;
     }
 
     /**
-     * @return Project|int
+     * @return Project|int|null
      */
     public function getProject()
     {
@@ -76,10 +79,10 @@ class ActivityQuery extends ProjectQuery
     }
 
     /**
-     * @param Project|int $project
-     * @return $this
+     * @param Project|int|null $project
+     * @return self
      */
-    public function setProject($project = null)
+    public function setProject($project = null): self
     {
         $this->project = $project;
 

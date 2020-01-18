@@ -11,9 +11,13 @@ namespace App\Form\Model;
 
 class SystemConfiguration
 {
+    public const SECTION_ROUNDING = 'rounding';
     public const SECTION_TIMESHEET = 'timesheet';
     public const SECTION_FORM_CUSTOMER = 'form_customer';
+    public const SECTION_FORM_USER = 'form_user';
     public const SECTION_THEME = 'theme';
+    public const SECTION_CALENDAR = 'calendar';
+    public const SECTION_BRANDING = 'branding';
 
     /**
      * @var string

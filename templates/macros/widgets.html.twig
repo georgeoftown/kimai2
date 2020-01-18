@@ -11,11 +11,30 @@
     </div>
 {%- endmacro -%}
 
+{%- macro entity_actions(tools) -%}
+    {% import _self as macro %}
+    <div class="breadcrumb">
+        <div class="box-tools">
+            <div class="btn-group">
+            {% set actions = {} %}
+            {%- for icon, values in tools  %}
+                {% if icon == 'back' %}
+                    {{ macro.action_button(icon, values) }}
+                {% else %}
+                    {% set actions = actions|merge({(icon): values}) %}
+                {% endif %}
+            {% endfor %}
+            {{ macro.table_actions(actions, '') }}
+            </div>
+        </div>
+    </div>
+{%- endmacro -%}
+
 {% macro page_header(title) %}
     <h2 class="page-header">{{ title|trans }}</h2>
 {% endmacro %}
 
-{% macro label_visible(visible) %}
+{% macro label_boolean(visible) %}
     {% import _self as macro %}
     {% if visible %}
         {{ macro.label('yes', 'success') }}
@@ -24,22 +43,47 @@
     {% endif %}
 {% endmacro %}
 
+{% macro label_visible(visible) %}
+    {% import _self as macro %}
+    {{ macro.label_boolean(visible) }}
+{% endmacro %}
+
 {% macro label_role(role) %}
     {% import _self as macro %}
     {% if role == 'ROLE_SUPER_ADMIN' %}
         {{ macro.label(role, 'danger') }}
+    {% elseif role == 'ROLE_ADMIN' %}
+        {{ macro.label(role, 'warning') }}
+    {% elseif role == 'ROLE_TEAMLEAD' %}
+        {{ macro.label(role, 'success') }}
+    {% elseif role == 'ROLE_USER' %}
+        {{ macro.label(role, 'gray') }}
     {% else %}
         {{ macro.label(role, 'primary') }}
     {% endif %}
 {% endmacro %}
 
 {% macro username(user) %}
-    {{ user.alias|default(user.username) }}
+    {{- user.displayName -}}
 {% endmacro %}
 
 {% macro label_user(user) %}
     {% import _self as macro %}
-    {{ macro.label(macro.username(user), 'primary') }}
+    {{ macro.label(user.displayName, 'primary') }}
+{% endmacro %}
+
+{% macro label_team(team, class) %}
+    {% import _self as macro %}
+    {{ macro.label(team.name, class|default('primary')) }}
+{% endmacro %}
+
+{% macro user_avatar(user, tooltip, class) %}
+    {% set avatar = avatar(user, admin_lte_context.default_avatar) %}
+    {% if tooltip is same as (false) %}
+    <img src="{{ avatar }}" class="img-circle{% if class is not empty %} {{ class }}{% endif %}" alt="{{ user.displayName }}" />
+    {% else %}
+    <img src="{{ avatar }}" class="img-circle{% if class is not empty %} {{ class }}{% endif %}" data-toggle="tooltip" data-placement="top" alt="{{ user.displayName }}" title="{{ tooltip|default(user.displayName) }}" />
+    {% endif %}
 {% endmacro %}
 
 {% macro label_activity(activity, url) %}
@@ -86,6 +130,12 @@
     </span>
 {% endmacro %}
 
+{% macro color_dot(color, tooltip) %}
+    <span class="label-color" data-toggle="tooltip" data-placement="top" title="{{ tooltip }}">
+        <span class="dot" style="background-color:{{ color }}"></span>
+    </span>
+{% endmacro %}
+
 {% macro badge_counter(count, url) %}
     {% if url %}
         <a href="{{ url }}"><span class="badge bg-blue">{{ count }}</span></a>
@@ -107,8 +157,14 @@
 {% macro alert(type, description, title, icon) %}
     <div class="alert alert-{{ type|default('danger') }} alert-dismissible">
         <button type="button" class="close" data-dismiss="alert" aria-hidden="true">×</button>
-        {% if title %}<h4><i class="icon {{ icon|icon(icon) }}"></i> {{ title|trans }}</h4>{% endif %}
-        {{ description|trans }}
+        {% if title and icon %}
+            <h4><i class="icon {{ icon|icon(icon) }}"></i> {{ title|trans }}</h4>
+            {{ description|trans }}
+        {% elseif icon %}
+            <h4><i class="icon {{ icon|icon(icon) }}"></i> {{ description|trans }}</h4>
+        {% else %}
+            {{ description|trans }}
+        {% endif %}
     </div>
 {% endmacro %}
 
@@ -153,31 +209,51 @@
     </div>
 {% endmacro %}
 
-{% macro table_actions(actions) %}
+{% macro table_actions(actions, class) %}
     {%- import _self as macro -%}
     {% if actions|length >= 1 %}
-        <div class="btn-group">
-            <button type="button" class="btn btn-default btn-sm dropdown-toggle" data-toggle="dropdown" aria-expanded="false">{{ 'label.actions'|trans }}
-                <span class="fa fa-caret-down"></span></button>
+        {% if class is null %}
+            {% set class = 'btn-sm' %}
+        {% endif %}
+        {% set trash = null %}
+        {% set divider = false %}
+        <div class="btn-group dropdown">
+            <button type="button" class="btn btn-default {{ class }} dropdown-toggle" data-toggle="dropdown" aria-expanded="false">
+                <span class="fa fa-chevron-down"></span>
+            </button>
             <ul class="dropdown-menu dropdown-menu-right">
-                {%- filter spaceless -%}
+                {%- apply spaceless -%}
                     {%- for icon,values in actions  %}
-                        {% set class = '' %}
-                        {% if icon == 'trash' %}
-                            {% set class = 'delete' %}
-                            {% if actions|length > 1 %}
-                            <li class="divider"></li>
+                        {% if icon == 'divider' and values is null %}
+                            {% if not loop.last and divider is same as (false) %}
+                                <li class="divider"></li>
+                            {% endif %}
+                            {% set divider = true %}
+                        {% else %}
+                            {% if values is iterable %}
+                                {% set values = values|merge({'title': icon|trans({}, 'actions')}) %}
+                            {% else %}
+                                {% set values = {'url': values, 'title': icon|trans({}, 'actions')} %}
+                            {% endif %}
+                            {% if icon == 'trash' %}
+                                {% set trash = values %}
+                            {% else %}
+                                {% set divider = false %}
+                                <li>
+                                    {{ macro.action_button(icon, values, false) }}
+                                </li>
                             {% endif %}
                         {% endif %}
-                        <li class="{{ class }}">
-                            {% if values is iterable %}
-                                {{ macro.action_button(icon, values|merge({'title': icon|trans({}, 'actions')}), false) }}
-                            {% else %}
-                                {{ macro.action_button(icon, {'url': values, 'title': icon|trans({}, 'actions')}, false) }}
-                            {% endif %}
-                        </li>
                     {% endfor -%}
-                {% endfilter %}
+                    {%- if trash is not null %}
+                        {% if actions|length > 1 and divider is same as (false) %}
+                            <li class="divider"></li>
+                        {% endif %}
+                        <li class="delete">
+                            {{ macro.action_button('trash', trash, false) }}
+                        </li>
+                    {% endif -%}
+                {% endapply %}
             </ul>
         </div>
     {% endif %}
@@ -185,7 +261,7 @@
 
 {% macro action_button(icon, values, type) %}
     {%- import _self as macro -%}
-    {%- filter spaceless -%}
+    {%- apply spaceless -%}
         {% set id = null %}
         {% set onclick = null %}
         {% set modal = null %}
@@ -234,41 +310,44 @@
         {% endif %}
 
         <a class="{{ class | trim }}" href="{{ url }}"
-                {%- if disabled is same as (true) -%}
-                    disabled="disabled"
-                {%- endif -%}
-                {%- if id is not empty -%}
-                    id="{{ id }}"
-                {%- endif -%}
-                {%- if toggle is not empty -%}
-                    data-toggle="{{ toggle }}"
-                {%- endif -%}
-                {%- if modal is not empty -%}
-                    data-toggle="modal" data-target="{{ modal }}"
-                {%- endif -%}
-                {%- if onclick is not empty -%}
-                    onclick="{{ onclick }}"
-                {%- endif -%}
-                {%- if target is not empty -%}
-                    target="{{ target }}"
-                {%- endif -%}
-                {%- if attr is not empty -%}
-                    {%- for name, value in attr %}
-                    {{- ' ' ~ name }}={% if '"' in value %}'{{ value|raw }}'{% else %}"{{ value|raw }}"{% endif %}
-                    {%- endfor -%}
-                {%- endif -%}
+                {%- if disabled is same as (true) %} disabled="disabled"{% endif %}
+                {%- if id is not empty %} id="{{ id }}"{% endif %}
+                {%- if toggle is not empty %} data-toggle="{{ toggle }}"{% endif %}
+                {%- if modal is not empty %} data-toggle="modal" data-target="{{ modal }}"{% endif %}
+                {%- if onclick is not empty %} onclick="{{ onclick }}"{% endif %}
+                {%- if target is not empty %} target="{{ target }}"{% endif %}
+                {%- if attr is not empty %}
+                    {% for name, value in attr %}
+                    {{ ' ' ~ name }}={% if '"' in value %}'{{ value|raw }}'{% else %}"{{ value|raw }}"{% endif %}
+                    {% endfor %}
+                {% endif %}
         >{% if title is not null %}{{ title }}{% else %}{{ macro.icon(icon) }}{% endif %}</a>
-    {% endfilter %}
+    {% endapply %}
 {% endmacro %}
 
 {% macro button_group(actions, type) %}
     {%- import _self as macro -%}
     <div class="btn-group">
-        {%- filter spaceless -%}
+        {%- apply spaceless -%}
         {%- for icon,values in actions  %}
-            {{ macro.action_button(icon, values, type) }}
+            {% if values.children is defined %}
+                <div class="btn-group">
+                    <button type="button" class="btn btn-default dropdown-toggle" data-toggle="dropdown" aria-expanded="false">
+                        {{ macro.icon(icon) }}&nbsp;
+                        <span class="caret"></span>
+                        <span class="sr-only">{{ 'label.toggle_dropdown'|trans }}</span>
+                    </button>
+                    <ul class="dropdown-menu" role="menu">
+                        {% for childIcon,childValues in values.children %}
+                            <li>{{ macro.action_button(childIcon, childValues, false) }}</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            {% else %}
+                {{ macro.action_button(icon, values, type) }}
+            {% endif %}
         {% endfor -%}
-        {% endfilter %}
+        {% endapply %}
     </div>
 {% endmacro %}
 
@@ -283,4 +362,87 @@
     {% for tag in taglist %}
         {{ macro.badge(tag.name , 'green') }}
     {% endfor %}
+{% endmacro %}
+
+{% macro form_type_value(type, value, entity) %}
+    {% import _self as widgets %}
+    {% if '\\ColorPickerType' in type %}
+        {{ widgets.color_dot(value, value) }}
+    {% elseif '\\DurationType' in type %}
+        {{ value|duration }}
+    {% elseif '\\YesNoType' in type or '\\CheckBoxType' in type %}
+        {{ widgets.label_boolean(value) }}
+    {% elseif '\\DatePickerType' in type %}
+        {{ value|date_short }}
+    {% elseif '\\DateTimePickerType' in type %}
+        {{ value|date_full }}
+    {% elseif '\\CountryType' in type %}
+        {{ value|country }}
+    {% elseif '\\CurrencyType' in type %}
+        {{ value|currency }}
+    {% elseif '\\LanguageType' in type %}
+        {{ value|language }}
+    {% elseif '\\MoneyType' in type  %}
+        {% if entity is null %}
+            {{ value }}
+        {% elseif class_name(entity) == 'App\\Entity\\Timesheet' %}
+            {{ value|money(entity.project.customer.currency) }}
+        {% elseif class_name(entity) == 'App\\Entity\\Customer' %}
+            {{ value|money(entity.currency) }}
+        {% elseif class_name(entity) == 'App\\Entity\\Project' %}
+            {{ value|money(entity.customer.currency) }}
+        {% elseif class_name(entity) == 'App\\Entity\\Activity' and entity.project is not null %}
+            {{ value|money(entity.project.customer.currency) }}
+        {% else %}
+            {{ value }}
+        {% endif %}
+    {% else %}
+        {{ value }}
+    {% endif %}
+{% endmacro %}
+
+{% macro team_list(teams, showTitle) %}
+    {% if showTitle is null %}
+        {% set showTitle = true %}
+    {% endif %}
+    {% import _self as macro %}
+    <table class="table table-hover dataTable" role="grid">
+        {% if showTitle %}
+        <thead>
+            <tr>
+                <th>{{ 'label.team'|trans }}</th>
+                <th>{{ 'label.user'|trans }}</th>
+            </tr>
+        </thead>
+        {% endif %}
+        <tbody>
+        {% for team in teams %}
+            <tr{% if is_granted('edit', team) %} class="modal-ajax-form open-edit" data-href="{{ path('admin_team_member', {'id': team.id}) }}"{% endif %}>
+                <td>
+                    {{ team.name }}
+                </td>
+                <td class="avatars">
+                    {% set userTeamCount = team.users|length %}
+                    {{ macro.user_avatar(team.teamlead, ('label.teamlead'|trans ~ ': ' ~ team.teamlead.displayName), 'teamlead') }}
+                    {% set teamHiddenId = 'team_' ~ team.id ~ '_hiddenUser' ~ random() %}
+                    {% set counter = 0  %}
+                    {% for user in team.users %}
+                        {% if user != team.teamlead %}
+                            {{ macro.user_avatar(user) }}
+                            {% set counter = counter + 1 %}
+                        {% endif %}
+                        {% if userTeamCount > 5 and counter == 4 and not loop.last %}
+                            <a href="#" onclick="$('#{{ teamHiddenId }}').toggleClass('hidden');$(this).hide();return false;" class="badge">{{ 'label.plus_more'|trans({'%count%': (userTeamCount - 5)}) }}</a>
+                            <span class="hidden" id="{{ teamHiddenId }}">
+                            {% set counter = counter + 1 %}
+                        {% endif %}
+                        {% if userTeamCount > 5 and counter != 4 and loop.last %}
+                            </span>
+                        {% endif %}
+                    {% endfor %}
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
 {% endmacro %}

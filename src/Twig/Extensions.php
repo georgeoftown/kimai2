@@ -14,7 +14,10 @@ use App\Entity\Timesheet;
 use App\Utils\Duration;
 use App\Utils\LocaleSettings;
 use NumberFormatter;
-use Symfony\Component\Intl\Intl;
+use Symfony\Component\Intl\Countries;
+use Symfony\Component\Intl\Currencies;
+use Symfony\Component\Intl\Languages;
+use Symfony\Component\Intl\Locales;
 use Twig\Extension\AbstractExtension;
 use Twig\TwigFilter;
 use Twig\TwigFunction;
@@ -46,56 +49,6 @@ class Extensions extends AbstractExtension
     protected $moneyFormatter;
 
     /**
-     * @var string[]
-     */
-    protected static $icons = [
-        'activity' => 'fas fa-tasks',
-        'admin' => 'fas fa-wrench',
-        'calendar' => 'far fa-calendar-alt',
-        'customer' => 'fas fa-users',
-        'copy' => 'far fa-copy',
-        'create' => 'far fa-plus-square',
-        'dashboard' => 'fas fa-tachometer-alt',
-        'delete' => 'far fa-trash-alt',
-        'download' => 'fas fa-download',
-        'duration' => 'far fa-hourglass',
-        'edit' => 'far fa-edit',
-        'filter' => 'fas fa-filter',
-        'help' => 'far fa-question-circle',
-        'invoice' => 'fas fa-file-invoice',
-        'list' => 'fas fa-list',
-        'logout' => 'fas fa-sign-out-alt',
-        'manual' => 'fas fa-book',
-        'money' => 'far fa-money-bill-alt',
-        'print' => 'fas fa-print',
-        'project' => 'fas fa-project-diagram',
-        'repeat' => 'fas fa-redo-alt',
-        'start' => 'fas fa-play-circle',
-        'start-small' => 'far fa-play-circle',
-        'stop' => 'fas fa-stop',
-        'stop-small' => 'far fa-stop-circle',
-        'timesheet' => 'fas fa-clock',
-        'trash' => 'far fa-trash-alt',
-        'user' => 'fas fa-user',
-        'visibility' => 'far fa-eye',
-        'settings' => 'fas fa-cog',
-        'export' => 'fas fa-file-export',
-        'pdf' => 'fas fa-file-pdf',
-        'csv' => 'fas fa-table',
-        'ods' => 'fas fa-table',
-        'xlsx' => 'fas fa-file-excel',
-        'on' => 'fas fa-toggle-on',
-        'off' => 'fas fa-toggle-off',
-        'audit' => 'fas fa-history',
-        'home' => 'fas fa-home',
-        'shop' => 'fas fa-shopping-cart',
-        'about' => 'fas fa-info-circle',
-        'debug' => 'far fa-file-alt',
-        'profile-stats' => 'far fa-chart-bar',
-        'profile' => 'fas fa-user-edit',
-    ];
-
-    /**
      * @param LocaleSettings $localeSettings
      */
     public function __construct(LocaleSettings $localeSettings)
@@ -111,10 +64,12 @@ class Extensions extends AbstractExtension
     {
         return [
             new TwigFilter('duration', [$this, 'duration']),
+            new TwigFilter('duration_decimal', [$this, 'durationDecimal']),
             new TwigFilter('money', [$this, 'money']),
             new TwigFilter('currency', [$this, 'currency']),
             new TwigFilter('country', [$this, 'country']),
-            new TwigFilter('icon', [$this, 'icon']),
+            new TwigFilter('language', [$this, 'language']),
+            new TwigFilter('amount', [$this, 'amount']),
             new TwigFilter('docu_link', [$this, 'documentationLink']),
         ];
     }
@@ -131,7 +86,7 @@ class Extensions extends AbstractExtension
     }
 
     /**
-     * @param $object
+     * @param object $object
      * @return null|string
      */
     public function getClassName($object)
@@ -152,20 +107,58 @@ class Extensions extends AbstractExtension
      */
     public function duration($duration, $format = null)
     {
-        $seconds = $duration;
-        if ($duration instanceof Timesheet) {
-            $seconds = $duration->getDuration();
-            if (null === $duration->getEnd()) {
-                $seconds = time() - $duration->getBegin()->getTimestamp();
-            }
-        }
-
-        if ($seconds < 0) {
-            return '?';
-        }
+        $duration = $this->getSecondsForDuration($duration);
 
         if (null === $format) {
             $format = $this->localeSettings->getDurationFormat();
+        }
+
+        return $this->formatDuration($duration, $format);
+    }
+
+    /**
+     * Transforms seconds into a decimal formatted duration string.
+     *
+     * @param int|Timesheet $duration
+     * @return string
+     */
+    public function durationDecimal($duration)
+    {
+        $duration = $this->getSecondsForDuration($duration);
+
+        return $this->getNumberFormatter()->format(number_format($duration / 3600, 2));
+    }
+
+    /**
+     * @param string|float $amount
+     * @return bool|false|string
+     */
+    public function amount($amount)
+    {
+        return $this->getNumberFormatter()->format($amount);
+    }
+
+    private function getSecondsForDuration($duration): int
+    {
+        if (null === $duration) {
+            $duration = 0;
+        }
+
+        if ($duration instanceof Timesheet) {
+            if (null === $duration->getEnd()) {
+                $duration = time() - $duration->getBegin()->getTimestamp();
+            } else {
+                $duration = $duration->getDuration();
+            }
+        }
+
+        return (int) $duration;
+    }
+
+    protected function formatDuration(int $seconds, string $format): string
+    {
+        if ($seconds < 0) {
+            return '?';
         }
 
         return $this->durationFormatter->format($seconds, $format);
@@ -177,7 +170,16 @@ class Extensions extends AbstractExtension
      */
     public function currency($currency)
     {
-        return Intl::getCurrencyBundle()->getCurrencySymbol($currency);
+        return Currencies::getSymbol($currency);
+    }
+
+    /**
+     * @param string $language
+     * @return string
+     */
+    public function language($language)
+    {
+        return Languages::getName($language, $this->locale);
     }
 
     /**
@@ -186,17 +188,12 @@ class Extensions extends AbstractExtension
      */
     public function country($country)
     {
-        return Intl::getRegionBundle()->getCountryName($country);
-    }
+        $country = strtoupper($country);
+        if (Countries::exists($country)) {
+            return Countries::getName($country);
+        }
 
-    /**
-     * @param string $name
-     * @param string $default
-     * @return string
-     */
-    public function icon($name, $default = '')
-    {
-        return self::$icons[$name] ?? $default;
+        return $country;
     }
 
     /**
@@ -208,6 +205,33 @@ class Extensions extends AbstractExtension
         return Constants::HOMEPAGE . '/documentation/' . $url;
     }
 
+    private function initLocale()
+    {
+        $locale = $this->localeSettings->getLocale();
+
+        if ($this->locale === $locale) {
+            return;
+        }
+
+        $this->locale = $locale;
+        $this->numberFormatter = new NumberFormatter($locale, NumberFormatter::DECIMAL);
+        $this->moneyFormatter = new NumberFormatter($locale, NumberFormatter::CURRENCY);
+    }
+
+    private function getNumberFormatter(): NumberFormatter
+    {
+        $this->initLocale();
+
+        return $this->numberFormatter;
+    }
+
+    private function getMoneyFormatter(): NumberFormatter
+    {
+        $this->initLocale();
+
+        return $this->moneyFormatter;
+    }
+
     /**
      * @param float $amount
      * @param string $currency
@@ -215,19 +239,11 @@ class Extensions extends AbstractExtension
      */
     public function money($amount, $currency = null)
     {
-        $locale = $this->localeSettings->getLocale();
-
-        if ($this->locale !== $locale) {
-            $this->locale = $locale;
-            $this->numberFormatter = new NumberFormatter($locale, NumberFormatter::DECIMAL);
-            $this->moneyFormatter = new NumberFormatter($locale, NumberFormatter::CURRENCY);
-        }
-
         if (null !== $currency) {
-            return $this->moneyFormatter->formatCurrency($amount, $currency);
+            return $this->getMoneyFormatter()->formatCurrency($amount, $currency);
         }
 
-        return $this->numberFormatter->format($amount);
+        return $this->getNumberFormatter()->format($amount);
     }
 
     /**
@@ -241,7 +257,7 @@ class Extensions extends AbstractExtension
     {
         $locales = [];
         foreach ($this->localeSettings->getAvailableLanguages() as $locale) {
-            $locales[] = ['code' => $locale, 'name' => Intl::getLocaleBundle()->getLocaleName($locale, $locale)];
+            $locales[] = ['code' => $locale, 'name' => Locales::getName($locale, $locale)];
         }
 
         return $locales;

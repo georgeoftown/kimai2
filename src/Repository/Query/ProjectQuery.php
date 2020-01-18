@@ -14,39 +14,34 @@ use App\Entity\Customer;
 /**
  * Can be used for advanced queries with the: ProjectRepository
  */
-class ProjectQuery extends VisibilityQuery
+class ProjectQuery extends BaseQuery implements VisibilityInterface
 {
-    /**
-     * @var Customer|int
-     */
-    protected $customer;
+    use VisibilityTrait;
+
+    public const PROJECT_ORDER_ALLOWED = ['id', 'name', 'comment', 'customer', 'orderNumber', 'projectStart', 'projectEnd'];
 
     /**
-     * @var array
+     * @var Customer|int|null
      */
-    protected $ignored = [];
-
+    private $customer;
     /**
-     * @param mixed $entity
-     * @return $this
+     * @var \DateTime
      */
-    public function addIgnoredEntity($entity)
+    private $projectStart;
+    /**
+     * @var \DateTime
+     */
+    private $projectEnd;
+
+    public function __construct()
     {
-        $this->ignored[] = $entity;
-
-        return $this;
+        $this->setDefaults([
+            'orderBy' => 'name',
+        ]);
     }
 
     /**
-     * @return array
-     */
-    public function getIgnoredEntities()
-    {
-        return $this->ignored;
-    }
-
-    /**
-     * @return Customer|int
+     * @return Customer|int|null
      */
     public function getCustomer()
     {
@@ -54,12 +49,36 @@ class ProjectQuery extends VisibilityQuery
     }
 
     /**
-     * @param Customer|int $customer
+     * @param Customer|int|null $customer
      * @return $this
      */
     public function setCustomer($customer = null)
     {
         $this->customer = $customer;
+
+        return $this;
+    }
+
+    public function getProjectStart(): ?\DateTime
+    {
+        return $this->projectStart;
+    }
+
+    public function setProjectStart(?\DateTime $projectStart): ProjectQuery
+    {
+        $this->projectStart = $projectStart;
+
+        return $this;
+    }
+
+    public function getProjectEnd(): ?\DateTime
+    {
+        return $this->projectEnd;
+    }
+
+    public function setProjectEnd(?\DateTime $projectEnd): ProjectQuery
+    {
+        $this->projectEnd = $projectEnd;
 
         return $this;
     }

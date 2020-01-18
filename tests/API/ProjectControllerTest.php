@@ -12,12 +12,12 @@ namespace App\Tests\API;
 use App\Entity\Customer;
 use App\Entity\Project;
 use App\Entity\User;
-use App\Repository\Query\VisibilityQuery;
+use App\Repository\Query\VisibilityInterface;
+use App\Tests\Mocks\ProjectTestMetaFieldSubscriberMock;
 use Symfony\Bundle\FrameworkBundle\Client;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
- * @coversDefaultClass \App\API\ProjectController
  * @group integration
  */
 class ProjectControllerTest extends APIControllerBaseTest
@@ -98,12 +98,14 @@ class ProjectControllerTest extends APIControllerBaseTest
         // if you wonder why: SQLite does case-sensitive ordering, so "Title" > "fifth”
         yield ['/api/projects', [], [[true, 1], [false, 1], [false, 3]]];
         yield ['/api/projects', ['customer' => '1'], [[true, 1], [false, 1]]];
-        yield ['/api/projects', ['customer' => '1', 'visible' => VisibilityQuery::SHOW_VISIBLE], [[true, 1], [false, 1]]];
-        yield ['/api/projects', ['customer' => '1', 'visible' => VisibilityQuery::SHOW_BOTH], [[true, 1], [false, 1], [false, 1]]];
-        yield ['/api/projects', ['customer' => '1', 'visible' => VisibilityQuery::SHOW_HIDDEN], [[false, 1]]];
-        yield ['/api/projects', ['customer' => '2', 'visible' => VisibilityQuery::SHOW_VISIBLE], []];
-        yield ['/api/projects', ['customer' => '2', 'visible' => VisibilityQuery::SHOW_BOTH], [[false, 2], [false, 2]]];
-        yield ['/api/projects', ['customer' => '2', 'visible' => VisibilityQuery::SHOW_HIDDEN], [[false, 2]]];
+        yield ['/api/projects', ['customer' => '1', 'visible' => VisibilityInterface::SHOW_VISIBLE], [[true, 1], [false, 1]]];
+        yield ['/api/projects', ['customer' => '1', 'visible' => VisibilityInterface::SHOW_BOTH], [[true, 1], [false, 1], [false, 1]]];
+        yield ['/api/projects', ['customer' => '1', 'visible' => VisibilityInterface::SHOW_HIDDEN], [[false, 1]]];
+        // customer is invisible, so nothing should be returned
+        yield ['/api/projects', ['customer' => '2', 'visible' => VisibilityInterface::SHOW_VISIBLE], []];
+        yield ['/api/projects', ['customer' => '2', 'visible' => VisibilityInterface::SHOW_BOTH], [[false, 2], [false, 2]]];
+        // customer is invisible, so nothing should be returned
+        yield ['/api/projects', ['customer' => '2', 'visible' => VisibilityInterface::SHOW_HIDDEN, 'start' => '2010-12-11T23:59:59', 'end' => '2030-12-11T23:59:59'], []];
     }
 
     public function testGetEntity()
@@ -128,7 +130,6 @@ class ProjectControllerTest extends APIControllerBaseTest
             'name' => 'foo',
             'customer' => 1,
             'visible' => true,
-            'budget' => 0,
         ];
         $this->request($client, '/api/projects', 'POST', [], json_encode($data));
         $this->assertTrue($client->getResponse()->isSuccessful());
@@ -153,6 +154,20 @@ class ProjectControllerTest extends APIControllerBaseTest
         $this->assertEquals(Response::HTTP_FORBIDDEN, $response->getStatusCode());
         $json = json_decode($response->getContent(), true);
         $this->assertEquals('User cannot create projects', $json['message']);
+    }
+
+    public function testPostActionWithInvalidData()
+    {
+        $client = $this->getClientForAuthenticatedUser(User::ROLE_ADMIN);
+        $data = [
+            'name' => 'foo',
+            'customer' => 100,
+            'xxxxx' => 'whoami',
+            'visible' => true
+        ];
+        $this->request($client, '/api/projects', 'POST', [], json_encode($data));
+        $response = $client->getResponse();
+        $this->assertApiCallValidationError($response, ['customer'], true);
     }
 
     public function testPatchAction()
@@ -211,17 +226,64 @@ class ProjectControllerTest extends APIControllerBaseTest
         $this->assertApiCallValidationError($response, ['customer']);
     }
 
+    public function testMetaActionThrowsNotFound()
+    {
+        $this->assertEntityNotFoundForPatch(User::ROLE_ADMIN, '/api/projects/42/meta', []);
+    }
+
+    public function testMetaActionThrowsExceptionOnMissingName()
+    {
+        return $this->assertExceptionForPatchAction(User::ROLE_ADMIN, '/api/projects/1/meta', ['value' => 'X'], [
+            'code' => 400,
+            'message' => 'Parameter "name" of value "NULL" violated a constraint "This value should not be null."'
+        ]);
+    }
+
+    public function testMetaActionThrowsExceptionOnMissingValue()
+    {
+        return $this->assertExceptionForPatchAction(User::ROLE_ADMIN, '/api/projects/1/meta', ['name' => 'X'], [
+            'code' => 400,
+            'message' => 'Parameter "value" of value "NULL" violated a constraint "This value should not be null."'
+        ]);
+    }
+
+    public function testMetaActionThrowsExceptionOnMissingMetafield()
+    {
+        return $this->assertExceptionForPatchAction(User::ROLE_ADMIN, '/api/projects/1/meta', ['name' => 'X', 'value' => 'Y'], [
+            'code' => 500,
+            'message' => 'Unknown meta-field requested'
+        ]);
+    }
+
+    public function testMetaAction()
+    {
+        $client = $this->getClientForAuthenticatedUser(User::ROLE_ADMIN);
+        $client->getContainer()->get('event_dispatcher')->addSubscriber(new ProjectTestMetaFieldSubscriberMock());
+
+        $data = [
+            'name' => 'metatestmock',
+            'value' => 'another,testing,bar'
+        ];
+        $this->request($client, '/api/projects/1/meta', 'PATCH', [], json_encode($data));
+
+        $this->assertTrue($client->getResponse()->isSuccessful());
+
+        $em = $client->getContainer()->get('doctrine.orm.entity_manager');
+        /** @var Project $project */
+        $project = $em->getRepository(Project::class)->find(1);
+        $this->assertEquals('another,testing,bar', $project->getMetaField('metatestmock')->getValue());
+    }
+
     protected function assertStructure(array $result, $full = true)
     {
         $expectedKeys = [
-            'id', 'name', 'visible', 'customer', 'hourlyRate', 'fixedRate'
+            'id', 'name', 'visible', 'customer', 'hourlyRate', 'fixedRate', 'color', 'metaFields', 'parentTitle', 'start', 'end'
         ];
 
         if ($full) {
-            $expectedKeys = array_merge(
-                $expectedKeys,
-                ['comment', 'budget', 'orderNumber', 'color']
-            );
+            $expectedKeys = array_merge($expectedKeys, [
+                'comment', 'budget', 'timeBudget', 'orderNumber', 'orderDate'
+            ]);
         }
 
         $actual = array_keys($result);

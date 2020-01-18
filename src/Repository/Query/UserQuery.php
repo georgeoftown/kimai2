@@ -12,30 +12,32 @@ namespace App\Repository\Query;
 /**
  * Can be used for advanced queries with the: UserRepository
  */
-class UserQuery extends VisibilityQuery
+class UserQuery extends BaseQuery implements VisibilityInterface
 {
-    /**
-     * @var string
-     */
-    protected $role;
+    use VisibilityTrait;
+
+    public const USER_ORDER_ALLOWED = ['id', 'alias', 'username', 'title', 'email'];
 
     /**
-     * @return string
+     * @var string|null
      */
-    public function getRole()
+    private $role;
+
+    public function __construct()
+    {
+        $this->setDefaults([
+            'orderBy' => 'username',
+        ]);
+    }
+
+    public function getRole(): ?string
     {
         return $this->role;
     }
 
-    /**
-     * @param string $role
-     * @return UserQuery
-     */
-    public function setRole($role)
+    public function setRole(?string $role): UserQuery
     {
-        if (false !== strpos($role, 'ROLE_') || null === $role) {
-            $this->role = $role;
-        }
+        $this->role = $role;
 
         return $this;
     }

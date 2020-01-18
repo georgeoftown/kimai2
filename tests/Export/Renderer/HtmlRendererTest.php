@@ -10,19 +10,23 @@
 namespace App\Tests\Export\Renderer;
 
 use App\Export\Renderer\HtmlRenderer;
+use Symfony\Component\EventDispatcher\EventDispatcher;
 use Symfony\Component\HttpFoundation\Request;
 use Twig\Environment;
 
 /**
+ * @covers \App\Export\Base\HtmlRenderer
+ * @covers \App\Export\Base\RendererTrait
  * @covers \App\Export\Renderer\HtmlRenderer
- * @covers \App\Export\Renderer\RendererTrait
+ * @group integration
  */
 class HtmlRendererTest extends AbstractRendererTest
 {
     public function testConfiguration()
     {
         $sut = new HtmlRenderer(
-            $this->getMockBuilder(Environment::class)->disableOriginalConstructor()->getMock()
+            $this->createMock(Environment::class),
+            new EventDispatcher()
         );
 
         $this->assertEquals('html', $sut->getId());
@@ -40,20 +44,26 @@ class HtmlRendererTest extends AbstractRendererTest
         $request->setLocale('en');
         $stack->push($request);
 
-        $sut = new HtmlRenderer($twig);
+        $sut = new HtmlRenderer($twig, new EventDispatcher());
 
         $response = $this->render($sut);
 
         $content = $response->getContent();
 
-        $this->assertContains('<h2>List of expenses</h2>', $content);
-        $this->assertContains('<h3>Summary</h3>', $content);
+        $this->assertStringContainsString('<h2>List of expenses</h2>', $content);
+        $this->assertStringContainsString('<h3>Summary</h3>', $content);
+        $this->assertEquals(1, substr_count($content, 'id="export-summary"'));
+        $this->assertEquals(1, substr_count($content, 'id="export-records"'));
+        $this->assertEquals(1, substr_count($content, 'id="summary-project"'));
+        $this->assertEquals(1, substr_count($content, 'id="summary-activity"'));
 
-        $this->assertContains('<td>Customer Name</td>', $content);
-        $this->assertContains('<td>project name</td>', $content);
-        $this->assertContains('<td class="duration">01:50 h</td>', $content);
-        $this->assertContains('<td class="cost">€2,437.12</td>', $content);
+        $this->assertStringContainsString('<td>Customer Name</td>', $content);
+        $this->assertStringContainsString('<td>project name</td>', $content);
+        $this->assertStringContainsString('<td class="duration summary-duration">01:50 h</td>', $content);
+        $this->assertStringContainsString('<td class="cost summary-rate">€2,437.12</td>', $content);
 
-        $this->assertEquals(5, substr_count($content, '<td>activity description</td>'));
+        // 5 times in the "full list" and once in the "summary with activities"
+        $this->assertEquals(6, substr_count($content, 'activity description'));
+        $this->assertEquals(1, substr_count($content, '<td>activity description</td>'));
     }
 }

@@ -80,46 +80,68 @@ class DateExtensions extends AbstractExtension
     }
 
     /**
-     * @param DateTime $date
+     * @param DateTime|string $date
      * @return string
+     * @throws \Exception
      */
-    public function dateShort(DateTime $date)
+    public function dateShort($date)
     {
         if (null === $this->dateFormat) {
             $this->dateFormat = $this->localeSettings->getDateFormat();
+        }
+
+        if (!$date instanceof DateTime) {
+            $date = new DateTime($date);
         }
 
         return date_format($date, $this->dateFormat);
     }
 
     /**
-     * @param DateTime $date
+     * @param DateTime|string $date
      * @return string
+     * @throws \Exception
      */
-    public function dateTime(DateTime $date)
+    public function dateTime($date)
     {
         if (null === $this->dateTimeFormat) {
             $this->dateTimeFormat = $this->localeSettings->getDateTimeFormat();
         }
 
-        return date_format($date, $this->dateTimeFormat);
+        if (!$date instanceof DateTime) {
+            $date = new DateTime($date);
+        }
+
+        return $date->format($this->dateTimeFormat);
     }
 
     /**
-     * @param DateTime $date
-     * @return string
+     * @param DateTime|string $date
+     * @param bool $userTimezone
+     * @return bool|false|string
+     * @throws \Exception
      */
-    public function dateTimeFull(DateTime $date)
+    public function dateTimeFull($date, bool $userTimezone = true)
     {
         if (null === $this->dateTimeTypeFormat) {
             $this->dateTimeTypeFormat = $this->localeSettings->getDateTimeTypeFormat();
+        }
+
+        if (!$date instanceof DateTime) {
+            $date = new DateTime($date);
+        }
+
+        $timezone = date_default_timezone_get();
+
+        if (!$userTimezone) {
+            $timezone = $date->getTimezone()->getName();
         }
 
         $formatter = new \IntlDateFormatter(
             $this->localeSettings->getLocale(),
             \IntlDateFormatter::MEDIUM,
             \IntlDateFormatter::MEDIUM,
-            date_default_timezone_get(),
+            $timezone,
             \IntlDateFormatter::GREGORIAN,
             $this->dateTimeTypeFormat
         );
@@ -128,23 +150,33 @@ class DateExtensions extends AbstractExtension
     }
 
     /**
-     * @param DateTime $date
+     * @param DateTime|string $date
      * @param string $format
      * @return false|string
+     * @throws \Exception
      */
-    public function dateFormat(DateTime $date, string $format)
+    public function dateFormat($date, string $format)
     {
+        if (!$date instanceof DateTime) {
+            $date = new DateTime($date);
+        }
+
         return date_format($date, $format);
     }
 
     /**
-     * @param DateTime $date
+     * @param DateTime|string $date
      * @return string
+     * @throws \Exception
      */
-    public function time(DateTime $date)
+    public function time($date)
     {
         if (null === $this->timeFormat) {
             $this->timeFormat = $this->localeSettings->getTimeFormat();
+        }
+
+        if (!$date instanceof DateTime) {
+            $date = new DateTime($date);
         }
 
         return date_format($date, $this->timeFormat);

@@ -9,17 +9,21 @@
 
 namespace App\Tests\Invoice\Renderer;
 
+use App\Invoice\InvoiceModel;
 use App\Invoice\Renderer\CsvRenderer;
-use App\Model\InvoiceModel;
+use PHPUnit\Framework\TestCase;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 /**
  * @covers \App\Invoice\Renderer\CsvRenderer
  * @covers \App\Invoice\Renderer\AbstractRenderer
  * @covers \App\Invoice\Renderer\AbstractSpreadsheetRenderer
+ * @group integration
  */
-class CsvRendererTest extends AbstractRendererTest
+class CsvRendererTest extends TestCase
 {
+    use RendererTestTrait;
+
     public function testSupports()
     {
         $sut = $this->getAbstractRenderer(CsvRenderer::class);
@@ -29,7 +33,7 @@ class CsvRendererTest extends AbstractRendererTest
         $this->assertFalse($sut->supports($this->getInvoiceDocument('timesheet.html.twig')));
         $this->assertFalse($sut->supports($this->getInvoiceDocument('foo.html.twig')));
         $this->assertFalse($sut->supports($this->getInvoiceDocument('company.docx')));
-        $this->assertTrue($sut->supports($this->getInvoiceDocument('export.csv')));
+        $this->assertTrue($sut->supports($this->getInvoiceDocument('export.csv', true)));
         $this->assertFalse($sut->supports($this->getInvoiceDocument('spreadsheet.xlsx')));
         $this->assertFalse($sut->supports($this->getInvoiceDocument('open-spreadsheet.ods')));
     }
@@ -47,7 +51,7 @@ class CsvRendererTest extends AbstractRendererTest
     {
         /** @var CsvRenderer $sut */
         $sut = $this->getAbstractRenderer(CsvRenderer::class);
-        $document = $this->getInvoiceDocument('export.csv');
+        $document = $this->getInvoiceDocument('export.csv', true);
         /** @var BinaryFileResponse $response */
         $response = $sut->render($document, $model);
 
@@ -58,8 +62,8 @@ class CsvRendererTest extends AbstractRendererTest
         $this->assertTrue(file_exists($file->getRealPath()));
         $content = file_get_contents($file->getRealPath());
 
-        $this->assertNotContains('${', $content);
-        $this->assertContains(',"' . $expectedRate . '"', $content);
+        $this->assertStringNotContainsString('${', $content);
+        $this->assertStringContainsString(',"' . $expectedRate . '"', $content);
         $this->assertEquals($expectedRows, substr_count($content, PHP_EOL));
         $this->assertEquals($expectedDescriptions, substr_count($content, 'activity description'));
         $this->assertEquals($expectedUser1, substr_count($content, ',"kevin",'));

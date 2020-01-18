@@ -11,32 +11,26 @@ namespace App\Form;
 
 use App\Entity\Customer;
 use App\Entity\Project;
-use App\Form\Type\ColorPickerType;
 use App\Form\Type\CustomerType;
-use App\Form\Type\FixedRateType;
-use App\Form\Type\HourlyRateType;
-use App\Form\Type\YesNoType;
+use App\Form\Type\DateTimePickerType;
 use App\Repository\CustomerRepository;
+use App\Repository\Query\CustomerFormTypeQuery;
 use Symfony\Component\Form\AbstractType;
-use Symfony\Component\Form\Extension\Core\Type\CheckboxType;
-use Symfony\Component\Form\Extension\Core\Type\MoneyType;
 use Symfony\Component\Form\Extension\Core\Type\TextareaType;
 use Symfony\Component\Form\Extension\Core\Type\TextType;
 use Symfony\Component\Form\FormBuilderInterface;
 use Symfony\Component\OptionsResolver\OptionsResolver;
 
-/**
- * Defines the form used to edit Projects.
- */
 class ProjectEditForm extends AbstractType
 {
+    use EntityFormTrait;
+
     /**
      * {@inheritdoc}
      */
     public function buildForm(FormBuilderInterface $builder, array $options)
     {
         $customer = null;
-        $currency = false;
         $id = null;
 
         if (isset($options['data'])) {
@@ -44,9 +38,9 @@ class ProjectEditForm extends AbstractType
             $entry = $options['data'];
             $id = $entry->getId();
 
-            if ($id !== null) {
+            if (null !== $entry->getCustomer()) {
                 $customer = $entry->getCustomer();
-                $currency = $customer->getCurrency();
+                $options['currency'] = $customer->getCurrency();
             }
         }
 
@@ -58,41 +52,38 @@ class ProjectEditForm extends AbstractType
                 ],
             ])
             ->add('comment', TextareaType::class, [
-                'label' => 'label.comment',
+                'label' => 'label.description',
                 'required' => false,
             ])
             ->add('orderNumber', TextType::class, [
                 'label' => 'label.orderNumber',
                 'required' => false,
             ])
-            ->add('customer', CustomerType::class, [
-                'query_builder' => function (CustomerRepository $repo) use ($customer) {
-                    return $repo->builderForEntityType($customer);
-                },
-            ])
-            ->add('color', ColorPickerType::class)
-            ->add('fixedRate', FixedRateType::class, [
-                'currency' => $currency,
-            ])
-            ->add('hourlyRate', HourlyRateType::class, [
-                'currency' => $currency,
-            ])
-            ->add('budget', MoneyType::class, [
-                'label' => 'label.budget',
+            ->add('orderDate', DateTimePickerType::class, [
+                'label' => 'label.orderDate',
                 'required' => false,
-                'currency' => $currency,
             ])
-            ->add('visible', YesNoType::class, [
-                'label' => 'label.visible',
+            ->add('start', DateTimePickerType::class, [
+                'label' => 'label.project_start',
+                'required' => false,
             ])
-        ;
+            ->add('end', DateTimePickerType::class, [
+                'label' => 'label.project_end',
+                'required' => false,
+            ])
+            ->add('customer', CustomerType::class, [
+                'query_builder' => function (CustomerRepository $repo) use ($builder, $customer) {
+                    $query = new CustomerFormTypeQuery($customer);
+                    $query->setUser($builder->getOption('user'));
+
+                    return $repo->getQueryBuilderForFormType($query);
+                },
+            ]);
+
+        $this->addCommonFields($builder, $options);
 
         if (null === $id && $options['create_more']) {
-            $builder->add('create_more', CheckboxType::class, [
-                'label' => 'label.create_more',
-                'required' => false,
-                'mapped' => false,
-            ]);
+            $this->addCreateMore($builder);
         }
     }
 
@@ -107,6 +98,7 @@ class ProjectEditForm extends AbstractType
             'csrf_field_name' => '_token',
             'csrf_token_id' => 'admin_project_edit',
             'currency' => Customer::DEFAULT_CURRENCY,
+            'include_budget' => false,
             'create_more' => false,
             'attr' => [
                 'data-form-event' => 'kimai.projectUpdate'

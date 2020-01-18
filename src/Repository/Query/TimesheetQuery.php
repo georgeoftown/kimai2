@@ -10,6 +10,7 @@
 namespace App\Repository\Query;
 
 use App\Entity\Activity;
+use App\Entity\Tag;
 use App\Entity\User;
 use App\Form\Model\DateRange;
 
@@ -24,22 +25,14 @@ class TimesheetQuery extends ActivityQuery
     public const STATE_EXPORTED = 4;
     public const STATE_NOT_EXPORTED = 5;
 
+    public const TIMESHEET_ORDER_ALLOWED = ['begin', 'end', 'duration', 'rate', 'customer', 'project', 'activity', 'description'];
+
     /**
-     * Overwritten for different default order
-     * @var string
+     * @var User|null
      */
-    protected $order = self::ORDER_DESC;
+    protected $timesheetUser;
     /**
-     * Overwritten for different default order
-     * @var string
-     */
-    protected $orderBy = 'begin';
-    /**
-     * @var User
-     */
-    protected $user;
-    /**
-     * @var Activity
+     * @var Activity|null
      */
     protected $activity;
     /**
@@ -57,28 +50,65 @@ class TimesheetQuery extends ActivityQuery
     /**
      * @var iterable
      */
-    protected $tags;
+    protected $tags = [];
+    /**
+     * @var User[]
+     */
+    private $users = [];
 
     public function __construct()
     {
-        $this->dateRange = new DateRange();
+        parent::__construct();
+        $this->setDefaults([
+            'order' => self::ORDER_DESC,
+            'orderBy' => 'begin',
+            'dateRange' => new DateRange()
+        ]);
+    }
+
+    public function addUser(User $user): self
+    {
+        $this->users[$user->getId()] = $user;
+
+        return $this;
+    }
+
+    public function removeUser(User $user): self
+    {
+        if (isset($this->users[$user->getId()])) {
+            unset($this->users[$user->getId()]);
+        }
+
+        return $this;
     }
 
     /**
-     * @return User
+     * @return User[]
+     */
+    public function getUsers(): array
+    {
+        return array_values($this->users);
+    }
+
+    /**
+     * Limit the data exclusively to the user (eg. users own timesheets).
+     *
+     * @return User|null
      */
     public function getUser()
     {
-        return $this->user;
+        return $this->timesheetUser;
     }
 
     /**
-     * @param User|int $user
+     * Limit the data exclusively to the user (eg. users own timesheets).
+     *
+     * @param User|int|null $user
      * @return TimesheetQuery
      */
     public function setUser($user = null)
     {
-        $this->user = $user;
+        $this->timesheetUser = $user;
 
         return $this;
     }
@@ -86,7 +116,7 @@ class TimesheetQuery extends ActivityQuery
     /**
      * Activity overwrites: setProject() and setCustomer()
      *
-     * @return Activity
+     * @return Activity|null
      */
     public function getActivity()
     {
@@ -94,7 +124,7 @@ class TimesheetQuery extends ActivityQuery
     }
 
     /**
-     * @param Activity|int $activity
+     * @param Activity|int|null $activity
      * @return TimesheetQuery
      */
     public function setActivity($activity = null)
@@ -118,10 +148,6 @@ class TimesheetQuery extends ActivityQuery
      */
     public function setState($state)
     {
-        if (!is_int($state) && $state !== (int) $state) {
-            return $this;
-        }
-
         $state = (int) $state;
         if (in_array($state, [self::STATE_ALL, self::STATE_RUNNING, self::STATE_STOPPED], true)) {
             $this->state = $state;
@@ -144,10 +170,6 @@ class TimesheetQuery extends ActivityQuery
      */
     public function setExported($exported)
     {
-        if (!is_int($exported) && $exported !== (int) $exported) {
-            return $this;
-        }
-
         $exported = (int) $exported;
         if (in_array($exported, [self::STATE_ALL, self::STATE_EXPORTED, self::STATE_NOT_EXPORTED], true)) {
             $this->exported = $exported;
@@ -156,10 +178,7 @@ class TimesheetQuery extends ActivityQuery
         return $this;
     }
 
-    /**
-     * @return \DateTime
-     */
-    public function getBegin()
+    public function getBegin(): ?\DateTime
     {
         return $this->dateRange->getBegin();
     }
@@ -175,10 +194,7 @@ class TimesheetQuery extends ActivityQuery
         return $this;
     }
 
-    /**
-     * @return \DateTime
-     */
-    public function getEnd()
+    public function getEnd(): ?\DateTime
     {
         return $this->dateRange->getEnd();
     }
@@ -216,9 +232,22 @@ class TimesheetQuery extends ActivityQuery
     /**
      * @return iterable
      */
-    public function getTags()
+    public function getTags($allowUnknown = false)
     {
-        return $this->tags;
+        if (empty($this->tags)) {
+            return [];
+        }
+
+        $result = [];
+
+        foreach ($this->tags as $tag) {
+            if (!$allowUnknown && $tag instanceof Tag && null === $tag->getId()) {
+                continue;
+            }
+            $result[] = $tag;
+        }
+
+        return $result;
     }
 
     /**
@@ -230,13 +259,5 @@ class TimesheetQuery extends ActivityQuery
         $this->tags = $tags;
 
         return $this;
-    }
-
-    /**
-     * @return bool
-     */
-    public function hasTags()
-    {
-        return !empty($this->tags) && count($this->tags) > 0;
     }
 }

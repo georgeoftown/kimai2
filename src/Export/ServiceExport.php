@@ -9,28 +9,19 @@
 
 namespace App\Export;
 
-class ServiceExport
+final class ServiceExport
 {
     /**
      * @var RendererInterface[]
      */
-    protected $renderer = [];
+    private $renderer = [];
 
     /**
-     * @param RendererInterface[] $renderer
+     * @var TimesheetExportInterface[]
      */
-    public function __construct(iterable $renderer)
-    {
-        foreach ($renderer as $render) {
-            $this->addRenderer($render);
-        }
-    }
+    private $exporter = [];
 
-    /**
-     * @param RendererInterface $renderer
-     * @return $this
-     */
-    public function addRenderer(RendererInterface $renderer)
+    public function addRenderer(RendererInterface $renderer): ServiceExport
     {
         $this->renderer[] = $renderer;
 
@@ -38,24 +29,44 @@ class ServiceExport
     }
 
     /**
-     * Returns an array of export renderer.
-     *
      * @return RendererInterface[]
      */
-    public function getRenderer()
+    public function getRenderer(): array
     {
         return $this->renderer;
     }
 
-    /**
-     * @param string $id
-     * @return RendererInterface|null
-     */
-    public function getRendererById(string $id)
+    public function getRendererById(string $id): ?RendererInterface
     {
         foreach ($this->renderer as $renderer) {
             if ($renderer->getId() === $id) {
                 return $renderer;
+            }
+        }
+
+        return null;
+    }
+
+    public function addTimesheetExporter(TimesheetExportInterface $exporter): ServiceExport
+    {
+        $this->exporter[] = $exporter;
+
+        return $this;
+    }
+
+    /**
+     * @return TimesheetExportInterface[]
+     */
+    public function getTimesheetExporter(): array
+    {
+        return $this->exporter;
+    }
+
+    public function getTimesheetExporterById(string $id): ?TimesheetExportInterface
+    {
+        foreach ($this->exporter as $exporter) {
+            if ($exporter->getId() === $id) {
+                return $exporter;
             }
         }
 

@@ -16,7 +16,7 @@ use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 use Symfony\Component\Console\Tester\CommandTester;
 
 /**
- * @coversDefaultClass \App\Command\VersionCommand
+ * @covers \App\Command\VersionCommand
  * @group integration
  */
 class VersionCommandTest extends KernelTestCase
@@ -26,7 +26,7 @@ class VersionCommandTest extends KernelTestCase
      */
     protected $application;
 
-    protected function setUp()
+    protected function setUp(): void
     {
         $kernel = self::bootKernel();
         $this->application = new Application($kernel);

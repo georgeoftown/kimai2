@@ -11,51 +11,71 @@ namespace App\Tests\DataFixtures;
 
 use App\Entity\Customer;
 use App\Entity\Project;
-use App\Entity\User;
 use Doctrine\Bundle\FixturesBundle\Fixture;
-use Doctrine\Common\Persistence\ObjectManager;
+use Doctrine\Persistence\ObjectManager;
 use Faker\Factory;
 
 /**
  * Defines the sample data to load in during controller tests.
  */
-class ProjectFixtures extends Fixture
+final class ProjectFixtures extends Fixture
 {
     /**
      * @var int
      */
-    protected $amount = 0;
+    private $amount = 0;
     /**
      * @var bool
      */
-    protected $isVisible = null;
-
+    private $isVisible = null;
     /**
-     * @return int
+     * @var callable
      */
+    private $callback;
+    /**
+     * @var Customer[]
+     */
+    private $customers = [];
+
     public function getAmount(): int
     {
         return $this->amount;
     }
 
-    /**
-     * @param int $amount
-     * @return ProjectFixtures
-     */
-    public function setAmount(int $amount)
+    public function setAmount(int $amount): ProjectFixtures
     {
         $this->amount = $amount;
 
         return $this;
     }
 
-    /**
-     * @param bool $visible
-     * @return $this
-     */
-    public function setIsVisible(bool $visible)
+    public function setIsVisible(bool $visible): ProjectFixtures
     {
         $this->isVisible = $visible;
+
+        return $this;
+    }
+
+    /**
+     * @param Customer[] $customers
+     * @return ProjectFixtures
+     */
+    public function setCustomers(array $customers): ProjectFixtures
+    {
+        $this->customers = $customers;
+
+        return $this;
+    }
+
+    /**
+     * Will be called prior to persisting the object.
+     *
+     * @param callable $callback
+     * @return ProjectFixtures
+     */
+    public function setCallback(callable $callback): ProjectFixtures
+    {
+        $this->callback = $callback;
 
         return $this;
     }
@@ -65,7 +85,10 @@ class ProjectFixtures extends Fixture
      */
     public function load(ObjectManager $manager)
     {
-        $customers = $this->getAllCustomers($manager);
+        $customers = $this->customers;
+        if (empty($customers)) {
+            $customers = $this->getAllCustomers($manager);
+        }
         $faker = Factory::create();
 
         for ($i = 0; $i < $this->amount; $i++) {
@@ -73,8 +96,8 @@ class ProjectFixtures extends Fixture
             if (null !== $this->isVisible) {
                 $visible = $this->isVisible;
             }
-            $entity = new Project();
-            $entity
+            $project = new Project();
+            $project
                 ->setName($faker->catchPhrase . ($visible ? '' : ' (x)'))
                 ->setBudget(rand(0, 10000))
                 ->setComment($faker->text)
@@ -82,7 +105,10 @@ class ProjectFixtures extends Fixture
                 ->setVisible($visible)
             ;
 
-            $manager->persist($entity);
+            if (null !== $this->callback) {
+                call_user_func($this->callback, $project);
+            }
+            $manager->persist($project);
         }
 
         $manager->flush();
@@ -90,12 +116,12 @@ class ProjectFixtures extends Fixture
 
     /**
      * @param ObjectManager $manager
-     * @return Customer[]
+     * @return array<int|string, Customer>
      */
-    protected function getAllCustomers(ObjectManager $manager)
+    protected function getAllCustomers(ObjectManager $manager): array
     {
         $all = [];
-        /* @var User[] $entries */
+        /** @var Customer[] $entries */
         $entries = $manager->getRepository(Customer::class)->findAll();
         foreach ($entries as $temp) {
             $all[$temp->getId()] = $temp;

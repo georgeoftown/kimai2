@@ -1,8 +1,17 @@
+parameters:
+    locale: en
+    app_locales: ar|cs|de|de_CH|da|en|es|fr|hu|it|ja|ko|nl|pt_BR|ru|sk|sv|tr|zh_CN
+
 services:
     _defaults:
         public: true
 
     test.PasswordEncoder: "@security.encoder_factory"
+
+    # added, so we are able to overwrite the service for the CalendarControllerTest
+    App\Configuration\CalendarConfiguration:
+        arguments: ['@App\Repository\ConfigurationRepository', "%kimai.calendar%"]
+        public: true
 
     App\Configuration\SystemConfiguration:
         arguments: ['@App\Repository\ConfigurationRepository', "%kimai.config%"]

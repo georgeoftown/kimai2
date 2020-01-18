@@ -37,9 +37,10 @@ class Tag
     /**
      * @var string
      *
-     * @ORM\Column(name="name", type="string", length=255, nullable=false)
+     * @ORM\Column(name="name", type="string", length=100, nullable=false)
      * @Assert\NotBlank()
-     * @Assert\Length(min=2, max=255)
+     * @Assert\Length(min=2, max=100)
+     * @Assert\Regex(pattern="/,/",match=false,message="Tag name cannot contain comma")
      */
     private $name;
 
@@ -55,36 +56,23 @@ class Tag
         $this->timesheets = new ArrayCollection();
     }
 
-    /**
-     * @return int
-     */
-    public function getId()
+    public function getId(): ?int
     {
         return $this->id;
     }
 
-    /**
-     * @param string $tagName
-     * @return Tag
-     */
-    public function setName($tagName)
+    public function setName(string $tagName): Tag
     {
         $this->name = $tagName;
 
         return $this;
     }
 
-    /**
-     * @return string
-     */
-    public function getName()
+    public function getName(): ?string
     {
         return $this->name;
     }
 
-    /**
-     * @param Timesheet $timesheet
-     */
     public function addTimesheet(Timesheet $timesheet)
     {
         if ($this->timesheets->contains($timesheet)) {
@@ -95,9 +83,6 @@ class Tag
         $timesheet->addTag($this);
     }
 
-    /**
-     * @param Timesheet $timesheet
-     */
     public function removeTimesheet(Timesheet $timesheet)
     {
         if (!$this->timesheets->contains($timesheet)) {

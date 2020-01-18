@@ -14,12 +14,11 @@ use App\Tests\DataFixtures\TagFixtures;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
- * @coversDefaultClass \App\API\TagController
  * @group integration
  */
 class TagControllerTest extends APIControllerBaseTest
 {
-    public function setUp()
+    protected function setUp(): void
     {
         $client = $this->getClientForAuthenticatedUser(User::ROLE_USER);
         $em = $client->getContainer()->get('doctrine.orm.entity_manager');
@@ -30,6 +29,11 @@ class TagControllerTest extends APIControllerBaseTest
         $fixture = new TagFixtures();
         $fixture->setTagArray($tagList);
         $this->importFixture($em, $fixture);
+    }
+
+    public function testIsSecure()
+    {
+        $this->assertUrlIsSecured('/api/tags');
     }
 
     public function testGetCollection()
@@ -54,6 +58,35 @@ class TagControllerTest extends APIControllerBaseTest
         $this->assertIsArray($result);
         $this->assertEmpty($result);
         $this->assertEquals(0, count($result));
+    }
+
+    public function testPostAction()
+    {
+        $client = $this->getClientForAuthenticatedUser(User::ROLE_ADMIN);
+        $data = [
+            'name' => 'foo',
+        ];
+        $this->request($client, '/api/tags', 'POST', [], json_encode($data));
+        $this->assertTrue($client->getResponse()->isSuccessful());
+
+        $result = json_decode($client->getResponse()->getContent(), true);
+        $this->assertIsArray($result);
+        $this->assertStructure($result);
+        $this->assertNotEmpty($result['id']);
+    }
+
+    public function testPostActionWithInvalidUser()
+    {
+        $client = $this->getClientForAuthenticatedUser(User::ROLE_USER);
+        $data = [
+            'name' => 'foo',
+        ];
+        $this->request($client, '/api/tags', 'POST', [], json_encode($data));
+        $response = $client->getResponse();
+        $this->assertFalse($response->isSuccessful());
+        $this->assertEquals(Response::HTTP_FORBIDDEN, $response->getStatusCode());
+        $json = json_decode($response->getContent(), true);
+        $this->assertEquals('User cannot create tags', $json['message']);
     }
 
     public function testPartOfEntries()
@@ -90,5 +123,22 @@ class TagControllerTest extends APIControllerBaseTest
     public function testDeleteActionWithUnknownTimesheet()
     {
         $this->assertEntityNotFoundForDelete(User::ROLE_ADMIN, '/api/tags/255', []);
+    }
+
+    protected function assertStructure(array $result, $full = true)
+    {
+        $expectedKeys = [
+            'id', 'name', 'timesheets'
+        ];
+
+        if ($full) {
+            $expectedKeys = array_merge($expectedKeys, []);
+        }
+
+        $actual = array_keys($result);
+        sort($actual);
+        sort($expectedKeys);
+
+        $this->assertEquals($expectedKeys, $actual, 'Tag structure does not match');
     }
 }

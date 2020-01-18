@@ -9,17 +9,26 @@
 
 namespace App\Controller;
 
+use App\Configuration\FormConfiguration;
 use App\Entity\Activity;
+use App\Entity\MetaTableTypeInterface;
 use App\Entity\Project;
+use App\Event\ActivityMetaDefinitionEvent;
+use App\Event\ActivityMetaDisplayEvent;
 use App\Form\ActivityEditForm;
 use App\Form\Toolbar\ActivityToolbarForm;
 use App\Form\Type\ActivityType;
 use App\Repository\ActivityRepository;
+use App\Repository\Query\ActivityFormTypeQuery;
 use App\Repository\Query\ActivityQuery;
 use Doctrine\ORM\ORMException;
 use Pagerfanta\Pagerfanta;
 use Sensio\Bundle\FrameworkExtraBundle\Configuration\Security;
+use Symfony\Component\EventDispatcher\EventDispatcherInterface;
+use Symfony\Component\Form\FormInterface;
+use Symfony\Component\HttpFoundation\RedirectResponse;
 use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Annotation\Route;
 
 /**
@@ -31,11 +40,28 @@ use Symfony\Component\Routing\Annotation\Route;
 class ActivityController extends AbstractController
 {
     /**
-     * @return \App\Repository\ActivityRepository
+     * @var ActivityRepository
      */
-    protected function getRepository()
+    private $repository;
+    /**
+     * @var FormConfiguration
+     */
+    private $configuration;
+    /**
+     * @var EventDispatcherInterface
+     */
+    protected $dispatcher;
+
+    public function __construct(ActivityRepository $repository, FormConfiguration $configuration, EventDispatcherInterface $dispatcher)
     {
-        return $this->getDoctrine()->getRepository(Activity::class);
+        $this->repository = $repository;
+        $this->configuration = $configuration;
+        $this->dispatcher = $dispatcher;
+    }
+
+    protected function getRepository(): ActivityRepository
+    {
+        return $this->repository;
     }
 
     /**
@@ -45,33 +71,43 @@ class ActivityController extends AbstractController
      *
      * @param int $page
      * @param Request $request
-     * @return \Symfony\Component\HttpFoundation\Response
+     * @return Response
      */
     public function indexAction($page, Request $request)
     {
         $query = new ActivityQuery();
-        $query
-            ->setOrderBy('name')
-            ->setExclusiveVisibility(true)
-            ->setPage($page)
-        ;
+        $query->setCurrentUser($this->getUser());
+        $query->setPage($page);
 
         $form = $this->getToolbarForm($query);
-        $form->handleRequest($request);
-        if ($form->isSubmitted() && $form->isValid()) {
-            /** @var ActivityQuery $query */
-            $query = $form->getData();
+        $form->setData($query);
+        $form->submit($request->query->all(), false);
+
+        if (!$form->isValid()) {
+            $query->resetByFormError($form->getErrors());
         }
 
         /* @var $entries Pagerfanta */
-        $entries = $this->getRepository()->findByQuery($query);
+        $entries = $this->getRepository()->getPagerfantaForQuery($query);
 
         return $this->render('activity/index.html.twig', [
             'entries' => $entries,
             'query' => $query,
-            'showFilter' => $form->isSubmitted(),
             'toolbarForm' => $form->createView(),
+            'metaColumns' => $this->findMetaColumns($query),
         ]);
+    }
+
+    /**
+     * @param ActivityQuery $query
+     * @return MetaTableTypeInterface[]
+     */
+    protected function findMetaColumns(ActivityQuery $query): array
+    {
+        $event = new ActivityMetaDisplayEvent($query, ActivityMetaDisplayEvent::ACTIVITY);
+        $this->dispatcher->dispatch($event);
+
+        return $event->getFields();
     }
 
     /**
@@ -81,7 +117,7 @@ class ActivityController extends AbstractController
      *
      * @param Request $request
      * @param Project|null $project
-     * @return \Symfony\Component\HttpFoundation\RedirectResponse|\Symfony\Component\HttpFoundation\Response
+     * @return RedirectResponse|Response
      */
     public function createAction(Request $request, ?Project $project = null)
     {
@@ -94,12 +130,31 @@ class ActivityController extends AbstractController
     }
 
     /**
+     * @Route(path="/{id}/budget", name="admin_activity_budget", methods={"GET"})
+     * @Security("is_granted('budget', activity)")
+     *
+     * @param Activity $activity
+     * @return Response
+     */
+    public function budgetAction(Activity $activity)
+    {
+        $stats = $this->getRepository()->getActivityStatistics($activity);
+
+        // TODO sent event with stats
+
+        return $this->render('activity/budget.html.twig', [
+            'activity' => $activity,
+            'stats' => $stats,
+        ]);
+    }
+
+    /**
      * @Route(path="/{id}/edit", name="admin_activity_edit", methods={"GET", "POST"})
      * @Security("is_granted('edit', activity)")
      *
      * @param Activity $activity
      * @param Request $request
-     * @return \Symfony\Component\HttpFoundation\RedirectResponse|\Symfony\Component\HttpFoundation\Response
+     * @return RedirectResponse|Response
      */
     public function editAction(Activity $activity, Request $request)
     {
@@ -112,7 +167,7 @@ class ActivityController extends AbstractController
      *
      * @param Activity $activity
      * @param Request $request
-     * @return \Symfony\Component\HttpFoundation\RedirectResponse|\Symfony\Component\HttpFoundation\Response
+     * @return RedirectResponse|Response
      */
     public function deleteAction(Activity $activity, Request $request)
     {
@@ -128,16 +183,11 @@ class ActivityController extends AbstractController
             ->add('activity', ActivityType::class, [
                 'label' => 'label.activity',
                 'query_builder' => function (ActivityRepository $repo) use ($activity) {
-                    $query = new ActivityQuery();
-                    $query
-                        ->setResultType(ActivityQuery::RESULT_TYPE_QUERYBUILDER)
-                        ->setProject($activity->getProject())
-                        ->setOrderGlobalsFirst(true)
-                        ->addIgnoredEntity($activity)
-                        ->setGlobalsOnly(null === $activity->getProject())
-                    ;
+                    $query = new ActivityFormTypeQuery();
+                    $query->setProject($activity->getProject());
+                    $query->setActivityToIgnore($activity);
 
-                    return $repo->findByQuery($query);
+                    return $repo->getQueryBuilderForFormType($query);
                 },
                 'required' => false,
             ])
@@ -171,29 +221,32 @@ class ActivityController extends AbstractController
     /**
      * @param Activity $activity
      * @param Request $request
-     * @return \Symfony\Component\HttpFoundation\RedirectResponse|\Symfony\Component\HttpFoundation\Response
+     * @return RedirectResponse|Response
      */
     protected function renderActivityForm(Activity $activity, Request $request)
     {
-        $editForm = $this->createEditForm($activity);
+        $event = new ActivityMetaDefinitionEvent($activity);
+        $this->dispatcher->dispatch($event);
 
+        $editForm = $this->createEditForm($activity);
         $editForm->handleRequest($request);
 
         if ($editForm->isSubmitted() && $editForm->isValid()) {
-            $entityManager = $this->getDoctrine()->getManager();
-            $entityManager->persist($activity);
-            $entityManager->flush();
+            try {
+                $this->getRepository()->saveActivity($activity);
+                $this->flashSuccess('action.update.success');
 
-            $this->flashSuccess('action.update.success');
-
-            if ($editForm->has('create_more') && $editForm->get('create_more')->getData() === true) {
-                $newActivity = new Activity();
-                $newActivity->setProject($activity->getProject());
-                $editForm = $this->createEditForm($newActivity);
-                $editForm->get('create_more')->setData(true);
-                $activity = $newActivity;
-            } else {
-                return $this->redirectToRoute('admin_activity');
+                if ($editForm->has('create_more') && $editForm->get('create_more')->getData() === true) {
+                    $newActivity = new Activity();
+                    $newActivity->setProject($activity->getProject());
+                    $editForm = $this->createEditForm($newActivity);
+                    $editForm->get('create_more')->setData(true);
+                    $activity = $newActivity;
+                } else {
+                    return $this->redirectToRoute('admin_activity');
+                }
+            } catch (ORMException $ex) {
+                $this->flashError('action.update.error', ['%reason%' => $ex->getMessage()]);
             }
         }
 
@@ -208,7 +261,7 @@ class ActivityController extends AbstractController
 
     /**
      * @param ActivityQuery $query
-     * @return \Symfony\Component\Form\FormInterface
+     * @return FormInterface
      */
     protected function getToolbarForm(ActivityQuery $query)
     {
@@ -222,21 +275,27 @@ class ActivityController extends AbstractController
 
     /**
      * @param Activity $activity
-     * @return \Symfony\Component\Form\FormInterface
+     * @return FormInterface
      */
     private function createEditForm(Activity $activity)
     {
-        if ($activity->getId() === null) {
-            $url = $this->generateUrl('admin_activity_create');
-        } else {
+        $currency = $this->configuration->getCustomerDefaultCurrency();
+        $url = $this->generateUrl('admin_activity_create');
+
+        if ($activity->getId() !== null) {
             $url = $this->generateUrl('admin_activity_edit', ['id' => $activity->getId()]);
+            if (null !== $activity->getProject()) {
+                $currency = $activity->getProject()->getCustomer()->getCurrency();
+            }
         }
 
         return $this->createForm(ActivityEditForm::class, $activity, [
             'action' => $url,
             'method' => 'POST',
+            'currency' => $currency,
             'create_more' => true,
             'customer' => true,
+            'include_budget' => $this->isGranted('budget', $activity)
         ]);
     }
 }

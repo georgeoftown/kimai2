@@ -12,16 +12,21 @@ namespace App\Repository;
 use App\Entity\Activity;
 use App\Entity\Timesheet;
 use App\Entity\User;
+use App\Model\Statistic\Day;
 use App\Model\Statistic\Month;
 use App\Model\Statistic\Year;
 use App\Model\TimesheetStatistic;
+use App\Repository\Loader\TimesheetLoader;
+use App\Repository\Paginator\LoaderPaginator;
+use App\Repository\Paginator\PaginatorInterface;
 use App\Repository\Query\TimesheetQuery;
 use DateTime;
 use Doctrine\DBAL\Types\Type;
+use Doctrine\ORM\EntityRepository;
 use Doctrine\ORM\QueryBuilder;
 use Pagerfanta\Pagerfanta;
 
-class TimesheetRepository extends AbstractRepository
+class TimesheetRepository extends EntityRepository
 {
     public const STATS_QUERY_DURATION = 'duration';
     public const STATS_QUERY_RATE = 'rate';
@@ -29,6 +34,26 @@ class TimesheetRepository extends AbstractRepository
     public const STATS_QUERY_AMOUNT = 'amount';
     public const STATS_QUERY_ACTIVE = 'active';
     public const STATS_QUERY_MONTHLY = 'monthly';
+
+    /**
+     * @param mixed $id
+     * @param null $lockMode
+     * @param null $lockVersion
+     * @return Timesheet|null
+     */
+    public function find($id, $lockMode = null, $lockVersion = null)
+    {
+        /** @var Timesheet|null $timesheet */
+        $timesheet = parent::find($id, $lockMode, $lockVersion);
+        if (null === $timesheet) {
+            return null;
+        }
+
+        $loader = new TimesheetLoader($this->getEntityManager());
+        $loader->loadResults([$timesheet]);
+
+        return $timesheet;
+    }
 
     /**
      * @param Timesheet $timesheet
@@ -43,6 +68,27 @@ class TimesheetRepository extends AbstractRepository
     }
 
     /**
+     * @param Timesheet[] $timesheets
+     * @throws \Exception
+     */
+    public function deleteMultiple(iterable $timesheets): void
+    {
+        $em = $this->getEntityManager();
+        $em->beginTransaction();
+
+        try {
+            foreach ($timesheets as $timesheet) {
+                $em->remove($timesheet);
+            }
+            $em->flush();
+            $em->commit();
+        } catch (\Exception $ex) {
+            $em->rollback();
+            throw $ex;
+        }
+    }
+
+    /**
      * @param Timesheet $timesheet
      * @throws \Doctrine\ORM\ORMException
      * @throws \Doctrine\ORM\OptimisticLockException
@@ -52,6 +98,27 @@ class TimesheetRepository extends AbstractRepository
         $entityManager = $this->getEntityManager();
         $entityManager->persist($timesheet);
         $entityManager->flush();
+    }
+
+    /**
+     * @param Timesheet[] $timesheets
+     * @throws \Exception
+     */
+    public function saveMultiple(array $timesheets): void
+    {
+        $em = $this->getEntityManager();
+        $em->beginTransaction();
+
+        try {
+            foreach ($timesheets as $timesheet) {
+                $em->persist($timesheet);
+            }
+            $em->flush();
+            $em->commit();
+        } catch (\Exception $ex) {
+            $em->rollback();
+            throw $ex;
+        }
     }
 
     /**
@@ -98,6 +165,9 @@ class TimesheetRepository extends AbstractRepository
             case self::STATS_QUERY_MONTHLY:
                 return $this->getMonthlyStats($user, $begin, $end);
 
+            case 'daily':
+                return $this->getDailyStats($user, $begin, $end);
+
             case self::STATS_QUERY_DURATION:
                 $what = 'SUM(t.duration)';
                 break;
@@ -118,7 +188,7 @@ class TimesheetRepository extends AbstractRepository
     }
 
     /**
-     * @param $select
+     * @param string $select
      * @param User $user
      * @return int
      * @throws \Doctrine\ORM\NonUniqueResultException
@@ -148,14 +218,14 @@ class TimesheetRepository extends AbstractRepository
 
         if (!empty($begin)) {
             $qb
-                ->andWhere($qb->expr()->gt('t.begin', ':from'))
-                ->setParameter('from', $begin, Type::DATETIME);
+                ->andWhere($qb->expr()->gte($this->getDatetimeFieldSql('t.begin'), ':from'))
+                ->setParameter('from', $begin);
         }
 
         if (!empty($end)) {
             $qb
-                ->andWhere($qb->expr()->lt('t.end', ':to'))
-                ->setParameter('to', $end, Type::DATETIME);
+                ->andWhere($qb->expr()->lte($this->getDatetimeFieldSql('t.end'), ':to'))
+                ->setParameter('to', $end);
         }
 
         if (null !== $user) {
@@ -215,15 +285,15 @@ class TimesheetRepository extends AbstractRepository
         ;
 
         if (!empty($begin)) {
-            $qb->where($qb->expr()->gt('t.begin', ':from'));
-            $qb->setParameter('from', $begin, Type::DATETIME);
+            $qb->andWhere($qb->expr()->gte($this->getDatetimeFieldSql('t.begin'), ':from'))
+                ->setParameter('from', $begin);
         } else {
-            $qb->where($qb->expr()->isNotNull('t.begin'));
+            $qb->andWhere($qb->expr()->isNotNull('t.begin'));
         }
 
         if (!empty($end)) {
-            $qb->andWhere($qb->expr()->lt('t.end', ':to'))
-                ->setParameter('to', $end, Type::DATETIME);
+            $qb->andWhere($qb->expr()->lte($this->getDatetimeFieldSql('t.end'), ':to'))
+                ->setParameter('to', $end);
         } else {
             $qb->andWhere($qb->expr()->isNotNull('t.end'));
         }
@@ -253,12 +323,139 @@ class TimesheetRepository extends AbstractRepository
             }
 
             $month = new Month($statRow['month']);
-            $month->setTotalDuration($statRow['duration'])
-                ->setTotalRate($statRow['rate']);
+            $month->setTotalDuration((int) $statRow['duration'])
+                ->setTotalRate((float) $statRow['rate']);
             $years[$curYear]->setMonth($month);
         }
 
         return $years;
+    }
+
+    /**
+     * @param DateTime $begin
+     * @param DateTime $end
+     * @param User|null $user
+     * @return mixed
+     */
+    protected function getDailyData(DateTime $begin, DateTime $end, ?User $user = null)
+    {
+        $query = new TimesheetQuery();
+        $query
+            ->setBegin($begin)
+            ->setEnd($end)
+            ->setUser($user)
+            ->setState(TimesheetQuery::STATE_STOPPED)
+        ;
+        $timesheets = $this->getTimesheetsForQuery($query);
+
+        $results = [];
+        /** @var Timesheet $result */
+        foreach ($timesheets as $result) {
+            $timezone = new \DateTimeZone($result->getTimezone());
+            /** @var \DateTime $beginTmp */
+            $beginTmp = $result->getBegin();
+            $beginTmp->setTimezone($timezone);
+            /** @var DateTime $endTmp */
+            $endTmp = $result->getEnd();
+            $endTmp->setTimezone($timezone);
+            $dateKeyEnd = $endTmp->format('Ymd');
+
+            do {
+                $dateKey = $beginTmp->format('Ymd');
+
+                if (!isset($results[$dateKey])) {
+                    $results[$dateKey] = [
+                        'rate' => 0,
+                        'duration' => 0,
+                        'month' => $beginTmp->format('n'),
+                        'year' => $beginTmp->format('Y'),
+                        'day' => $beginTmp->format('j'),
+                        'details' => []
+                    ];
+                }
+
+                if ($dateKey !== $dateKeyEnd) {
+                    $newDateBegin = clone $beginTmp;
+                    $newDateBegin->add(new \DateInterval('P1D'));
+                    $newDateBegin->setTime(0, 0, 0);
+                } else {
+                    $newDateBegin = clone $endTmp;
+                }
+
+                $duration = $newDateBegin->getTimestamp() - $beginTmp->getTimestamp();
+                $durationPercent = 0;
+                if ($result->getDuration() !== null && $result->getDuration() > 0) {
+                    $durationPercent = $duration / $result->getDuration();
+                }
+                $rate = $result->getRate() * $durationPercent;
+
+                $results[$dateKey]['rate'] += $rate;
+                $results[$dateKey]['duration'] += $duration;
+                $detailsId = $result->getProject()->getCustomer()->getId() . '_' . $result->getProject()->getId();
+                if (!isset($results[$dateKey]['details'][$detailsId])) {
+                    $results[$dateKey]['details'][$detailsId] = [
+                        'project' => $result->getProject(),
+                        'activity' => $result->getActivity(),
+                        'duration' => 0,
+                        'rate' => 0,
+                    ];
+
+                    $results[$dateKey]['details'][$detailsId]['duration'] += $duration;
+                    $results[$dateKey]['details'][$detailsId]['rate'] += $rate;
+                }
+
+                $beginTmp = $newDateBegin;
+
+                if ((int) $end->format('Ymd') < (int) $newDateBegin->format('Ymd')) {
+                    break 1;
+                }
+            } while ($dateKey !== $dateKeyEnd);
+        }
+
+        ksort($results);
+
+        foreach ($results as $key => $value) {
+            $results[$key]['details'] = array_values($results[$key]['details']);
+        }
+        $results = array_values($results);
+
+        return $results;
+    }
+
+    /**
+     * @param User $user
+     * @param DateTime $begin
+     * @param DateTime $end
+     * @return Day[]
+     * @throws \Exception
+     */
+    public function getDailyStats(User $user, DateTime $begin, DateTime $end): array
+    {
+        $results = $this->getDailyData($begin, $end, $user);
+
+        /** @var Day[] $days */
+        $days = [];
+
+        // prefill the array
+        $tmp = clone $end;
+        $until = (int) $begin->format('Ymd');
+        while ((int) $tmp->format('Ymd') > $until) {
+            $tmp->modify('-1 day');
+            $last = clone $tmp;
+            $days[$last->format('Ymd')] = new Day($last, 0, 0.00);
+        }
+
+        foreach ($results as $statRow) {
+            $dateTime = new DateTime();
+            $dateTime->setDate($statRow['year'], $statRow['month'], $statRow['day']);
+            $dateTime->setTime(0, 0, 0);
+            $day = new Day($dateTime, (int) $statRow['duration'], (float) $statRow['rate']);
+            $days[$dateTime->format('Ymd')] = $day;
+        }
+
+        ksort($days);
+
+        return array_values($days);
     }
 
     /**
@@ -269,28 +466,23 @@ class TimesheetRepository extends AbstractRepository
     {
         $qb = $this->getEntityManager()->createQueryBuilder();
 
-        $qb->select('t', 'a', 'p', 'c')
+        $qb->select('t')
             ->from(Timesheet::class, 't')
-            ->join('t.activity', 'a')
-            ->join('t.project', 'p')
-            ->join('p.customer', 'c')
-            ->where($qb->expr()->isNotNull('t.begin'))
+            ->andWhere($qb->expr()->isNotNull('t.begin'))
             ->andWhere($qb->expr()->isNull('t.end'))
             ->orderBy('t.begin', 'DESC');
 
-        $params = [];
-
         if (null !== $user) {
             $qb->andWhere('t.user = :user');
-            $params['user'] = $user;
+            $qb->setParameter('user', $user);
         }
 
-        return $qb->getQuery()->execute($params);
+        return $this->getHydratedResultsByQuery($qb, false);
     }
 
     /**
      * @param User $user
-     * @param int $limit
+     * @param int $hardLimit
      * @return int
      * @throws RepositoryException
      * @throws \Doctrine\ORM\ORMException
@@ -324,30 +516,165 @@ class TimesheetRepository extends AbstractRepository
         return $counter;
     }
 
+    private function addPermissionCriteria(QueryBuilder $qb, ?User $user = null, array $teams = [])
+    {
+        // make sure that all queries without a user see all projects
+        if (null === $user && empty($teams)) {
+            return;
+        }
+
+        if (empty($teams)) {
+            return;
+        }
+
+        // make sure that admins see all timesheet records
+        if (null !== $user && ($user->isSuperAdmin() || $user->isAdmin())) {
+            return;
+        }
+
+        $qb
+            ->leftJoin('p.teams', 'teams')
+            ->leftJoin('c.teams', 'c_teams');
+
+        $orTeam = $qb->expr()->orX(
+            $qb->expr()->isMemberOf(':teams', 'p.teams'),
+            $qb->expr()->isMemberOf(':teams', 'c.teams')
+        );
+        $qb->andWhere($orTeam);
+
+        $qb->setParameter('teams', $teams);
+    }
+
+    public function getPagerfantaForQuery(TimesheetQuery $query): Pagerfanta
+    {
+        $paginator = new Pagerfanta($this->getPaginatorForQuery($query));
+        $paginator->setMaxPerPage($query->getPageSize());
+        $paginator->setCurrentPage($query->getPage());
+
+        return $paginator;
+    }
+
+    protected function getPaginatorForQuery(TimesheetQuery $query): PaginatorInterface
+    {
+        $qb = $this->getQueryBuilderForQuery($query);
+        $qb
+            ->resetDQLPart('select')
+            ->resetDQLPart('orderBy')
+            ->select($qb->expr()->countDistinct('t.id'))
+        ;
+        $counter = (int) $qb->getQuery()->getSingleScalarResult();
+
+        $qb = $this->getQueryBuilderForQuery($query);
+
+        return new LoaderPaginator(new TimesheetLoader($qb->getEntityManager()), $qb, $counter);
+    }
+
     /**
+     * When switching $fullyHydrated to true, the call gets even more expensive.
+     * You normally don't need this, unless you want to access deeply nested attributes for many entries!
+     *
      * @param TimesheetQuery $query
-     * @return QueryBuilder|Pagerfanta|array
+     * @param bool $fullyHydrated
+     * @return Timesheet[]
      */
-    public function findByQuery(TimesheetQuery $query)
+    public function getTimesheetsForQuery(TimesheetQuery $query, bool $fullyHydrated = false): iterable
+    {
+        $qb = $this->getQueryBuilderForQuery($query);
+
+        return $this->getHydratedResultsByQuery($qb, $fullyHydrated);
+    }
+
+    /**
+     * @param QueryBuilder $qb
+     * @param bool $fullyHydrated
+     * @return Timesheet[]
+     */
+    protected function getHydratedResultsByQuery(QueryBuilder $qb, bool $fullyHydrated = false): iterable
+    {
+        $results = $qb->getQuery()->getResult();
+
+        $loader = new TimesheetLoader($qb->getEntityManager(), $fullyHydrated);
+        $loader->loadResults($results);
+
+        return $results;
+    }
+
+    private function getQueryBuilderForQuery(TimesheetQuery $query): QueryBuilder
     {
         $qb = $this->getEntityManager()->createQueryBuilder();
 
-        $qb->select('t', 'a', 'p', 'c', 'u', 'tags')
+        $qb
+            ->select('t')
             ->from(Timesheet::class, 't')
-            ->leftJoin('t.activity', 'a')
-            ->leftJoin('t.user', 'u')
             ->leftJoin('t.project', 'p')
             ->leftJoin('p.customer', 'c')
-            ->leftJoin('t.tags', 'tags')
-            ->orderBy('t.' . $query->getOrderBy(), $query->getOrder());
+        ;
 
+        $orderBy = $query->getOrderBy();
+        switch ($orderBy) {
+            case 'project':
+                $orderBy = 'p.name';
+                break;
+            case 'customer':
+                $orderBy = 'c.name';
+                break;
+            case 'activity':
+                $qb->leftJoin('t.activity', 'a');
+                $orderBy = 'a.name';
+                break;
+            default:
+                $orderBy = 't.' . $orderBy;
+                break;
+        }
+
+        $qb->addOrderBy($orderBy, $query->getOrder());
+
+        $user = [];
         if (null !== $query->getUser()) {
-            $qb->andWhere('t.user = :user')
-                ->setParameter('user', $query->getUser());
+            $user[] = $query->getUser();
+        }
+
+        $user = array_merge($user, $query->getUsers());
+
+        if (empty($user) && null !== $query->getCurrentUser()) {
+            $currentUser = $query->getCurrentUser();
+
+            if (!$currentUser->isSuperAdmin() && !$currentUser->isAdmin()) {
+                // make sure that the user himself is in the list of users, if he is part of a team
+                // if teams are used and the user is not a teamlead, the list of users would be empty and then leading to NOT limit the select by user IDs
+                $user[] = $currentUser;
+
+                foreach ($currentUser->getTeams() as $team) {
+                    if ($currentUser->isTeamleadOf($team)) {
+                        $query->addTeam($team);
+                    }
+                }
+            }
+        }
+
+        if (!empty($query->getTeams())) {
+            foreach ($query->getTeams() as $team) {
+                foreach ($team->getUsers() as $teamUser) {
+                    $user[] = $teamUser;
+                }
+            }
+        }
+
+        $user = array_map(function ($user) {
+            if ($user instanceof User) {
+                return $user->getId();
+            }
+
+            return $user;
+        }, $user);
+        $user = array_unique($user);
+
+        if (!empty($user)) {
+            $qb->andWhere($qb->expr()->in('t.user', $user));
         }
 
         if (null !== $query->getBegin()) {
-            $qb->andWhere('t.begin >= :begin')
+            $qb->andWhere($qb->expr()->gte($this->getDatetimeFieldSql('t.begin'), ':begin'))
                 ->setParameter('begin', $query->getBegin());
         }
 
@@ -358,14 +685,14 @@ class TimesheetRepository extends AbstractRepository
         }
 
         if (null !== $query->getEnd()) {
-            $qb->andWhere('t.begin <= :end')
+            $qb->andWhere($qb->expr()->lte($this->getDatetimeFieldSql('t.begin'), ':end'))
                 ->setParameter('end', $query->getEnd());
         }
 
         if ($query->getExported() === TimesheetQuery::STATE_EXPORTED) {
-            $qb->andWhere('t.exported = :exported')->setParameter('exported', true);
+            $qb->andWhere('t.exported = :exported')->setParameter('exported', true, \PDO::PARAM_BOOL);
         } elseif ($query->getExported() === TimesheetQuery::STATE_NOT_EXPORTED) {
-            $qb->andWhere('t.exported = :exported')->setParameter('exported', false);
+            $qb->andWhere('t.exported = :exported')->setParameter('exported', false, \PDO::PARAM_BOOL);
         }
 
         if (null !== $query->getActivity()) {
@@ -383,12 +710,43 @@ class TimesheetRepository extends AbstractRepository
             }
         }
 
-        if ($query->hasTags()) {
-            $qb->andWhere('tags.id IN (:tags)')
-                ->setParameter('tags', $query->getTags()->toArray());
+        $tags = $query->getTags();
+        if (!empty($tags)) {
+            $qb->andWhere($qb->expr()->isMemberOf(':tags', 't.tags'))
+                ->setParameter('tags', $query->getTags());
         }
 
-        return $this->getBaseQueryResult($qb, $query);
+        $this->addPermissionCriteria($qb, $query->getCurrentUser(), $query->getTeams());
+
+        if ($query->hasSearchTerm()) {
+            $searchAnd = $qb->expr()->andX();
+            $searchTerm = $query->getSearchTerm();
+
+            foreach ($searchTerm->getSearchFields() as $metaName => $metaValue) {
+                $qb->leftJoin('t.meta', 'meta');
+                $searchAnd->add(
+                    $qb->expr()->andX(
+                        $qb->expr()->eq('meta.name', ':metaName'),
+                        $qb->expr()->like('meta.value', ':metaValue')
+                    )
+                );
+                $qb->setParameter('metaName', $metaName);
+                $qb->setParameter('metaValue', '%' . $metaValue . '%');
+            }
+
+            if ($searchTerm->hasSearchTerm()) {
+                $searchAnd->add(
+                    $qb->expr()->like('t.description', ':searchTerm')
+                );
+                $qb->setParameter('searchTerm', '%' . $searchTerm->getSearchTerm() . '%');
+            }
+
+            if ($searchAnd->count() > 0) {
+                $qb->andWhere($searchAnd);
+            }
+        }
+
+        return $qb;
     }
 
     /**
@@ -424,7 +782,7 @@ class TimesheetRepository extends AbstractRepository
         }
 
         if (null !== $startFrom) {
-            $qb->andWhere($qb->expr()->gt('t.begin', ':begin'))
+            $qb->andWhere($qb->expr()->gte($this->getDatetimeFieldSql('t.begin'), ':begin'))
                 ->setParameter('begin', $startFrom);
         }
 
@@ -437,15 +795,43 @@ class TimesheetRepository extends AbstractRepository
         $ids = array_column($results, 'maxid');
 
         $qb = $this->getEntityManager()->createQueryBuilder();
-        $qb->select('t', 'a', 'p', 'c')
+        $qb->select('t')
             ->from(Timesheet::class, 't')
-            ->join('t.activity', 'a')
-            ->join('t.project', 'p')
-            ->join('p.customer', 'c')
             ->andWhere($qb->expr()->in('t.id', $ids))
             ->orderBy('t.end', 'DESC')
         ;
 
-        return $qb->getQuery()->getResult();
+        return $this->getHydratedResultsByQuery($qb, true);
+    }
+
+    /**
+     * @param Timesheet[] $timesheets
+     */
+    public function setExported(array $timesheets)
+    {
+        $em = $this->getEntityManager();
+        $em->beginTransaction();
+
+        $qb = $em->createQueryBuilder();
+        $qb
+            ->update(Timesheet::class, 't')
+            ->set('t.exported', ':exported')
+            ->where($qb->expr()->in('t.id', ':ids'))
+            ->setParameter('exported', true, \PDO::PARAM_BOOL)
+            ->setParameter('ids', $timesheets)
+            ->getQuery()
+            ->execute();
+
+        $em->commit();
+    }
+
+    private function getDatetimeFieldSql(string $field): string
+    {
+        // this would change the selected data for queries that join across multiple timezones
+        // but due to tax laws, this is disabled - exports/invoices should *always* include the data from
+        // the own timezone, not from the original users timezone
+        // return sprintf('CONVERT_TZ(%s, \'UTC\', t.timezone)', $field);
+
+        return $field;
     }
 }

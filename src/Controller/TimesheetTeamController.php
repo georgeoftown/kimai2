@@ -9,112 +9,48 @@
 
 namespace App\Controller;
 
-use App\Entity\Tag;
 use App\Entity\Timesheet;
-use App\Form\TimesheetEditForm;
-use App\Form\Toolbar\TimesheetToolbarForm;
+use App\Event\TimesheetMetaDisplayEvent;
+use App\Form\TimesheetAdminEditForm;
 use App\Repository\ActivityRepository;
 use App\Repository\ProjectRepository;
 use App\Repository\Query\TimesheetQuery;
-use Doctrine\Common\Collections\ArrayCollection;
-use Pagerfanta\Pagerfanta;
+use App\Repository\TagRepository;
 use Sensio\Bundle\FrameworkExtraBundle\Configuration\Security;
 use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Annotation\Route;
 
 /**
- * Controller used for manage timesheet entries in the admin part of the site.
- *
  * @Route(path="/team/timesheet")
  * @Security("is_granted('view_other_timesheet')")
  */
-class TimesheetTeamController extends AbstractController
+class TimesheetTeamController extends TimesheetAbstractController
 {
-    use TimesheetControllerTrait;
-
     /**
      * @Route(path="/", defaults={"page": 1}, name="admin_timesheet", methods={"GET"})
      * @Route(path="/page/{page}", requirements={"page": "[1-9]\d*"}, name="admin_timesheet_paginated", methods={"GET"})
      * @Security("is_granted('view_other_timesheet')")
      *
-     * @param $page
+     * @param int $page
      * @param Request $request
-     * @return \Symfony\Component\HttpFoundation\Response
+     * @return Response
      */
     public function indexAction($page, Request $request)
     {
-        $query = new TimesheetQuery();
-        $query->setPage($page);
-
-        $form = $this->getToolbarForm($query);
-        $form->handleRequest($request);
-        if ($form->isSubmitted() && $form->isValid()) {
-            /** @var TimesheetQuery $query */
-            $query = $form->getData();
-            if (null !== $query->getBegin()) {
-                $query->getBegin()->setTime(0, 0, 0);
-            }
-            if (null !== $query->getEnd()) {
-                $query->getEnd()->setTime(23, 59, 59);
-            }
-        }
-
-        if ($query->hasTags()) {
-            $query->setTags(
-                new ArrayCollection(
-                    $this->getDoctrine()->getRepository(Tag::class)->findIdsByTagNameList(implode(',', $query->getTags()->toArray()))
-                )
-            );
-        }
-
-        /* @var $entries Pagerfanta */
-        $entries = $this->getRepository()->findByQuery($query);
-
-        return $this->render('timesheet-team/index.html.twig', [
-            'entries' => $entries,
-            'page' => $query->getPage(),
-            'query' => $query,
-            'showFilter' => $form->isSubmitted(),
-            'toolbarForm' => $form->createView(),
-        ]);
+        return $this->index($page, $request, 'timesheet-team/index.html.twig', TimesheetMetaDisplayEvent::TEAM_TIMESHEET);
     }
 
     /**
-     * @Route(path="/export", name="admin_timesheet_export", methods={"GET"})
+     * @Route(path="/export/{exporter}", name="admin_timesheet_export", methods={"GET"})
      *
      * @param Request $request
-     * @return \Symfony\Component\HttpFoundation\Response
+     * @param string $exporter
+     * @return Response
      */
-    public function exportAction(Request $request)
+    public function exportAction(Request $request, string $exporter)
     {
-        $query = new TimesheetQuery();
-        $query->setResultType(TimesheetQuery::RESULT_TYPE_OBJECTS);
-
-        $form = $this->getToolbarForm($query);
-        $form->handleRequest($request);
-        if ($form->isSubmitted() && $form->isValid()) {
-            /** @var TimesheetQuery $query */
-            $query = $form->getData();
-        }
-
-        // by default the current month is exported, but it can be overwritten
-        if (null === $query->getBegin()) {
-            $query->setBegin($this->dateTime->createDateTime('first day of this month'));
-        }
-        $query->getBegin()->setTime(0, 0, 0);
-
-        if (null === $query->getEnd()) {
-            $query->setEnd($this->dateTime->createDateTime('last day of this month'));
-        }
-        $query->getEnd()->setTime(23, 59, 59);
-
-        /* @var $entries Pagerfanta */
-        $entries = $this->getRepository()->findByQuery($query);
-
-        return $this->render('timesheet-team/export.html.twig', [
-            'entries' => $entries,
-            'query' => $query,
-        ]);
+        return $this->export($request, $exporter);
     }
 
     /**
@@ -127,7 +63,7 @@ class TimesheetTeamController extends AbstractController
      */
     public function editAction(Timesheet $entry, Request $request)
     {
-        return $this->edit($entry, $request, 'admin_timesheet', 'timesheet-team/edit.html.twig');
+        return $this->edit($entry, $request, 'timesheet-team/edit.html.twig');
     }
 
     /**
@@ -139,58 +75,90 @@ class TimesheetTeamController extends AbstractController
      * @param ActivityRepository $activityRepository
      * @return \Symfony\Component\HttpFoundation\RedirectResponse|\Symfony\Component\HttpFoundation\Response
      */
-    public function createAction(Request $request, ProjectRepository $projectRepository, ActivityRepository $activityRepository)
+    public function createAction(Request $request, ProjectRepository $projectRepository, ActivityRepository $activityRepository, TagRepository $tagRepository)
     {
-        return $this->create($request, 'admin_timesheet', 'timesheet-team/edit.html.twig', $projectRepository, $activityRepository);
+        return $this->create($request, 'timesheet-team/edit.html.twig', $projectRepository, $activityRepository, $tagRepository);
     }
 
     /**
-     * @param Timesheet $entry
-     * @param string $redirectRoute
-     * @return \Symfony\Component\Form\FormInterface
+     * @Route(path="/multi-update", name="admin_timesheet_multi_update", methods={"POST"})
+     * @Security("is_granted('edit_other_timesheet')")
      */
-    protected function getCreateForm(Timesheet $entry, string $redirectRoute)
+    public function multiUpdateAction(Request $request)
     {
-        return $this->createForm(TimesheetEditForm::class, $entry, [
-            'action' => $this->generateUrl('admin_timesheet_create'),
-            'include_rate' => $this->isGranted('edit_rate', $entry),
-            'include_user' => true,
-            'customer' => true,
-        ]);
+        return $this->multiUpdate($request, 'timesheet-team/multi-update.html.twig');
     }
 
     /**
-     * @param Timesheet $entry
-     * @param int $page
-     * @param string $redirectRoute
-     * @return \Symfony\Component\Form\FormInterface
+     * @Route(path="/multi-delete", name="admin_timesheet_multi_delete", methods={"POST"})
+     * @Security("is_granted('delete_other_timesheet')")
      */
-    protected function getEditForm(Timesheet $entry, $page, string $redirectRoute)
+    public function multiDeleteAction(Request $request)
     {
-        return $this->createForm(TimesheetEditForm::class, $entry, [
-            'action' => $this->generateUrl('admin_timesheet_edit', [
-                'id' => $entry->getId(),
-                'page' => $page,
-            ]),
-            'include_rate' => $this->isGranted('edit_rate', $entry),
-            'include_exported' => $this->isGranted('edit_export', $entry),
-            'include_user' => true,
-            'customer' => true,
-        ]);
+        return $this->multiDelete($request);
     }
 
-    /**
-     * @param TimesheetQuery $query
-     * @return \Symfony\Component\Form\FormInterface
-     */
-    protected function getToolbarForm(TimesheetQuery $query)
+    protected function prepareQuery(TimesheetQuery $query)
     {
-        return $this->createForm(TimesheetToolbarForm::class, $query, [
-            'action' => $this->generateUrl('admin_timesheet', [
-                'page' => $query->getPage(),
-            ]),
-            'method' => 'GET',
-            'include_user' => true,
-        ]);
+        $query->setCurrentUser($this->getUser());
+    }
+
+    protected function getPermissionEditExport(): string
+    {
+        return 'edit_export_other_timesheet';
+    }
+
+    protected function getPermissionEditRate(): string
+    {
+        return 'edit_rate_other_timesheet';
+    }
+
+    protected function getCreateFormClassName(): string
+    {
+        return TimesheetAdminEditForm::class;
+    }
+
+    protected function getEditFormClassName(): string
+    {
+        return TimesheetAdminEditForm::class;
+    }
+
+    protected function includeUserInForms(string $formName): bool
+    {
+        if ($formName === 'toolbar') {
+            return true;
+        }
+
+        return $this->isGranted('edit_other_timesheet');
+    }
+
+    protected function getTimesheetRoute(): string
+    {
+        return 'admin_timesheet';
+    }
+
+    protected function getEditRoute(): string
+    {
+        return 'admin_timesheet_edit';
+    }
+
+    protected function getCreateRoute(): string
+    {
+        return 'admin_timesheet_create';
+    }
+
+    protected function getMultiUpdateRoute(): string
+    {
+        return 'admin_timesheet_multi_update';
+    }
+
+    protected function getMultiDeleteRoute(): string
+    {
+        return 'admin_timesheet_multi_delete';
+    }
+
+    protected function canSeeStartEndTime(): bool
+    {
+        return true;
     }
 }

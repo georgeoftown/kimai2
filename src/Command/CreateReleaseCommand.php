@@ -18,6 +18,8 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 
 /**
  * Command used to create a release package with pre-installed composer, SQLite database and user.
+ *
+ * @codeCoverageIgnore
  */
 class CreateReleaseCommand extends Command
 {
@@ -49,6 +51,14 @@ class CreateReleaseCommand extends Command
             ->addOption('directory', null, InputOption::VALUE_OPTIONAL, 'Directory where the release package will be stored', 'var/data/')
             ->addOption('release', null, InputOption::VALUE_OPTIONAL, 'The version that should be zipped', Constants::VERSION)
         ;
+
+        /*
+         * Hide this command in production.
+         * Maybe it should be de-activated completely?!
+         */
+        if (getenv('APP_ENV') === 'prod') {
+            $this->setHidden(true);
+        }
     }
 
     /**
@@ -93,33 +103,36 @@ class CreateReleaseCommand extends Command
         $io->success('Prepare new packages for Kimai ' . $version . ' in ' . $tmpDir);
 
         $gitCmd = sprintf(self::CLONE_CMD, $version);
-        $tar = 'kimai-release-' . $version;
         $zip = 'kimai-release-' . $version;
 
         if ($version === Constants::VERSION && Constants::STATUS !== 'stable') {
-            $tar .= '_' . Constants::STATUS;
             $zip .= '_' . Constants::STATUS;
         }
 
-        $tar .= '.tar.gz';
         $zip .= '.zip';
 
-        // this removes the current env settings, as they might differ from the release ones
-        // if we don't unset them, the .env file won't be read when executing bin/console commands
-        putenv('DATABASE_URL');
-        putenv('APP_ENV');
+        $prefix = 'APP_ENV=prod DATABASE_URL=sqlite:///%kernel.project_dir%/var/data/kimai.sqlite';
 
         $commands = [
             'Clone repository' => $gitCmd . ' ' . $tmpDir,
-            'Install composer dependencies' => 'cd ' . $tmpDir . ' && composer install --no-dev --optimize-autoloader',
-            'Create .env file' => 'cd ' . $tmpDir . ' && cp .env.dist .env',
-            'Create database' => 'cd ' . $tmpDir . ' && bin/console doctrine:database:create -n',
-            'Create tables' => 'cd ' . $tmpDir . ' && bin/console doctrine:schema:create -n',
-            'Add all migrations' => 'cd ' . $tmpDir . ' && bin/console doctrine:migrations:version --add --all -n',
+            'Install composer dependencies' => sprintf('cd %s && %s composer install --no-dev --optimize-autoloader', $tmpDir, $prefix),
+            'Create database' => sprintf('cd %s && %s bin/console kimai:install -n', $tmpDir, $prefix),
         ];
 
         $filesToDelete = [
             '.git*',
+            '.codecov.yml',
+            '.editorconfig',
+            '.php_cs.dist',
+            '.travis.yml',
+            '*.lock',
+            'package.json',
+            'phpstan.neon',
+            'Dockerfile',
+            'phpunit.xml.dist',
+            'webpack.config.js',
+            'assets/',
+            'tests/',
             'var/cache/*',
             'var/data/kimai_test.sqlite',
             'var/log/*.log',
@@ -131,25 +144,24 @@ class CreateReleaseCommand extends Command
         }
 
         $commands = array_merge($commands, [
-            'Create tar' => 'cd ' . $tmpDir . ' && tar -czf ' . $directory . '/' . $tar . ' .',
-            'Create zip' => 'cd ' . $tmpDir . ' && zip -r ' . $directory . '/' . $zip . ' .',
+            'Create release zip' => 'cd ' . $tmpDir . ' && zip -q -r ' . $directory . '/' . $zip . ' .',
             'Remove tmp directory' => 'rm -rf ' . $tmpDir,
         ]);
 
         $exitCode = 0;
         foreach ($commands as $title => $command) {
-            $io->success($title);
             passthru($command, $exitCode);
             if ($exitCode !== 0) {
                 $io->error('Failed with command: ' . $command);
 
                 return -1;
+            } else {
+                $io->success($title);
             }
         }
 
         $io->success(
-            'New release packages available at: ' . PHP_EOL .
-            $directory . '/' . $tar . PHP_EOL .
+            'New release package available at: ' . PHP_EOL .
             $directory . '/' . $zip
         );
 

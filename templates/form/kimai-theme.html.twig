@@ -19,3 +19,29 @@
         {{ block('form_widget_simple') }}
     </div>
 {% endblock daterange_widget %}
+
+{% block datetime_widget -%}
+    {%- if widget == 'single_text' -%}
+        <div class="input-group">
+            <div class="input-group-addon">
+                <a href="#" onclick="$('#{{ id }}').val(moment().format('{{ attr['data-format'] }}')).trigger('change')"><i class="fa fa-calendar-alt"></i></a>
+            </div>
+            {{ block('form_widget_simple') }}
+        </div>
+    {%- else -%}
+        {{ block('form_widget_simple') }}
+    {%- endif -%}
+{%- endblock datetime_widget %}
+
+{% block text_widget -%}
+    {% if icon is not empty %}
+    <div class="input-group">
+        <div class="input-group-addon">
+            <i class="{{ icon|icon }}"></i>
+        </div>
+        {{ block('form_widget_simple') }}
+    </div>
+    {% else %}
+        {{ block('form_widget_simple') }}
+    {% endif %}
+{%- endblock text_widget %}

@@ -9,6 +9,7 @@
 
 namespace App\Tests\Model;
 
+use App\Entity\Project;
 use App\Model\ProjectStatistic;
 use PHPUnit\Framework\TestCase;
 
@@ -19,24 +20,23 @@ class ProjectStatisticTest extends TestCase
 {
     public function testDefaultValues()
     {
-        $sut = new ProjectStatistic();
-        $this->assertEquals(0, $sut->getActivityAmount());
-        $this->assertEquals(0, $sut->getCount());
-        $this->assertEquals(0, $sut->getRecordAmount());
-        $this->assertEquals(0, $sut->getRecordDuration());
+        $sut = new ProjectStatistic(new Project());
+        self::assertEquals(0, $sut->getActivityAmount());
+        self::assertEquals(0, $sut->getRecordAmount());
+        self::assertEquals(0, $sut->getRecordDuration());
     }
 
     public function testSetter()
     {
-        $sut = new ProjectStatistic();
-        $sut->setCount(123);
+        $project = new Project();
+        $sut = new ProjectStatistic($project);
         $sut->setRecordAmount(7654.298);
         $sut->setRecordDuration(826.10);
         $sut->setActivityAmount(13);
 
-        $this->assertEquals(13, $sut->getActivityAmount());
-        $this->assertEquals(123, $sut->getCount());
-        $this->assertEquals(7654, $sut->getRecordAmount());
-        $this->assertEquals(826, $sut->getRecordDuration());
+        self::assertEquals(13, $sut->getActivityAmount());
+        self::assertEquals(7654, $sut->getRecordAmount());
+        self::assertEquals(826, $sut->getRecordDuration());
+        self::assertSame($project, $sut->getProject());
     }
 }

@@ -7,16 +7,17 @@
  * file that was distributed with this source code.
  */
 
-namespace App\Tests\Export\Renderer;
+namespace App\Tests\Form\DataTransformer;
 
 use App\Entity\Tag;
 use App\Form\DataTransformer\TagArrayToStringTransformer;
 use App\Repository\TagRepository;
+use PHPUnit\Framework\TestCase;
 
 /**
  * @covers \App\Form\DataTransformer\TagArrayToStringTransformer
  */
-class TagArrayToStringTransformerTest extends AbstractRendererTest
+class TagArrayToStringTransformerTest extends TestCase
 {
     public function testTransform()
     {
@@ -44,7 +45,7 @@ class TagArrayToStringTransformerTest extends AbstractRendererTest
             (new Tag())->setName('bar'),
         ];
 
-        $repository = $this->getMockBuilder(TagRepository::class)->setMethods(['findBy'])->disableOriginalConstructor()->getMock();
+        $repository = $this->getMockBuilder(TagRepository::class)->onlyMethods(['findBy'])->disableOriginalConstructor()->getMock();
         $repository->expects($this->once())->method('findBy')->willReturn($results);
 
         $sut = new TagArrayToStringTransformer($repository);
@@ -52,8 +53,8 @@ class TagArrayToStringTransformerTest extends AbstractRendererTest
         $this->assertEquals([], $sut->reverseTransform(''));
         $this->assertEquals([], $sut->reverseTransform(null));
 
-        $actual = $sut->reverseTransform('foo, bar');
+        $actual = $sut->reverseTransform('foo, bar, hello');
 
-        $this->assertEquals($results, $actual);
+        $this->assertEquals(array_merge($results, [(new Tag())->setName('hello')]), $actual);
     }
 }

@@ -10,8 +10,7 @@
 namespace App\Command;
 
 use App\Entity\User;
-use Doctrine\Bundle\DoctrineBundle\Registry;
-use Symfony\Bridge\Doctrine\RegistryInterface;
+use Doctrine\Persistence\ManagerRegistry;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Helper\QuestionHelper;
 use Symfony\Component\Console\Input\InputArgument;
@@ -19,38 +18,26 @@ use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Question\Question;
 use Symfony\Component\Console\Style\SymfonyStyle;
-use Symfony\Component\Security\Core\Encoder\UserPasswordEncoder;
 use Symfony\Component\Security\Core\Encoder\UserPasswordEncoderInterface;
 use Symfony\Component\Validator\Validator\ValidatorInterface;
 
-/**
- * Command used to create application user.
- */
-class CreateUserCommand extends Command
+final class CreateUserCommand extends Command
 {
     /**
-     * @var UserPasswordEncoder
+     * @var UserPasswordEncoderInterface
      */
-    protected $encoder;
+    private $encoder;
     /**
-     * @var Registry
+     * @var ManagerRegistry
      */
-    protected $doctrine;
+    private $doctrine;
     /**
      * @var ValidatorInterface
      */
-    protected $validator;
+    private $validator;
 
-    /**
-     * @param UserPasswordEncoderInterface $encoder
-     * @param RegistryInterface $registry
-     * @param ValidatorInterface $validator
-     */
-    public function __construct(
-        UserPasswordEncoderInterface $encoder,
-        RegistryInterface $registry,
-        ValidatorInterface $validator
-    ) {
+    public function __construct(UserPasswordEncoderInterface $encoder, ManagerRegistry $registry, ValidatorInterface $validator)
+    {
         $this->encoder = $encoder;
         $this->doctrine = $registry;
         $this->validator = $validator;
@@ -108,9 +95,6 @@ class CreateUserCommand extends Command
             ->setRoles(explode(',', $role))
         ;
 
-        $pwd = $this->encoder->encodePassword($user, $user->getPlainPassword());
-        $user->setPassword($pwd);
-
         $errors = $this->validator->validate($user, null, ['Registration']);
         if ($errors->count() > 0) {
             /** @var \Symfony\Component\Validator\ConstraintViolation $error */
@@ -124,10 +108,13 @@ class CreateUserCommand extends Command
                 );
             }
 
-            return;
+            return 1;
         }
 
         try {
+            $pwd = $this->encoder->encodePassword($user, $user->getPlainPassword());
+            $user->setPassword($pwd);
+
             $entityManager = $this->doctrine->getManager();
             $entityManager->persist($user);
             $entityManager->flush();
@@ -135,7 +122,11 @@ class CreateUserCommand extends Command
         } catch (\Exception $ex) {
             $io->error('Failed to create user: ' . $user->getUsername());
             $io->error('Reason: ' . $ex->getMessage());
+
+            return 2;
         }
+
+        return 0;
     }
 
     /**

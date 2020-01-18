@@ -13,7 +13,6 @@ use App\Constants;
 use App\Entity\User;
 
 /**
- * @coversDefaultClass \App\API\StatusController
  * @group integration
  */
 class StatusControllerTest extends APIControllerBaseTest
@@ -21,6 +20,7 @@ class StatusControllerTest extends APIControllerBaseTest
     public function testIsSecure()
     {
         $this->assertUrlIsSecured('/api/ping');
+        $this->assertUrlIsSecured('/api/version');
     }
 
     public function testPing()

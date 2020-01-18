@@ -12,16 +12,20 @@ declare(strict_types=1);
 namespace App\API;
 
 use App\Entity\Customer;
-use App\Form\CustomerEditForm;
+use App\Event\CustomerMetaDefinitionEvent;
+use App\Form\API\CustomerApiEditForm;
 use App\Repository\CustomerRepository;
 use App\Repository\Query\CustomerQuery;
+use App\Utils\SearchTerm;
 use FOS\RestBundle\Controller\Annotations as Rest;
 use FOS\RestBundle\Controller\Annotations\RouteResource;
 use FOS\RestBundle\Request\ParamFetcherInterface;
 use FOS\RestBundle\View\View;
 use FOS\RestBundle\View\ViewHandlerInterface;
+use Nelmio\ApiDocBundle\Annotation\Security as ApiSecurity;
 use Sensio\Bundle\FrameworkExtraBundle\Configuration\Security;
 use Swagger\Annotations as SWG;
+use Symfony\Component\EventDispatcher\EventDispatcherInterface;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
@@ -29,28 +33,28 @@ use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 /**
  * @RouteResource("Customer")
  *
- * @Security("is_granted('ROLE_USER')")
+ * @Security("is_granted('IS_AUTHENTICATED_REMEMBERED')")
  */
 class CustomerController extends BaseApiController
 {
     /**
      * @var CustomerRepository
      */
-    protected $repository;
-
+    private $repository;
     /**
      * @var ViewHandlerInterface
      */
-    protected $viewHandler;
-
+    private $viewHandler;
     /**
-     * @param ViewHandlerInterface $viewHandler
-     * @param CustomerRepository $repository
+     * @var EventDispatcherInterface
      */
-    public function __construct(ViewHandlerInterface $viewHandler, CustomerRepository $repository)
+    private $dispatcher;
+
+    public function __construct(ViewHandlerInterface $viewHandler, CustomerRepository $repository, EventDispatcherInterface $dispatcher)
     {
         $this->viewHandler = $viewHandler;
         $this->repository = $repository;
+        $this->dispatcher = $dispatcher;
     }
 
     /**
@@ -67,16 +71,15 @@ class CustomerController extends BaseApiController
      * @Rest\QueryParam(name="visible", requirements="\d+", strict=true, nullable=true, description="Visibility status to filter activities (1=visible, 2=hidden, 3=both)")
      * @Rest\QueryParam(name="order", requirements="ASC|DESC", strict=true, nullable=true, description="The result order. Allowed values: ASC, DESC (default: ASC)")
      * @Rest\QueryParam(name="orderBy", requirements="id|name", strict=true, nullable=true, description="The field by which results will be ordered. Allowed values: id, name (default: name)")
+     * @Rest\QueryParam(name="term", requirements="[a-zA-Z0-9 \-,:]+", strict=true, nullable=true, description="Free search term")
      *
-     * @return Response
+     * @ApiSecurity(name="apiUser")
+     * @ApiSecurity(name="apiToken")
      */
-    public function cgetAction(ParamFetcherInterface $paramFetcher)
+    public function cgetAction(ParamFetcherInterface $paramFetcher): Response
     {
         $query = new CustomerQuery();
-        $query
-            ->setResultType(CustomerQuery::RESULT_TYPE_OBJECTS)
-            ->setOrderBy('name')
-        ;
+        $query->setCurrentUser($this->getUser());
 
         if (null !== ($order = $paramFetcher->get('order'))) {
             $query->setOrder($order);
@@ -90,7 +93,11 @@ class CustomerController extends BaseApiController
             $query->setVisibility($visible);
         }
 
-        $data = $this->repository->findByQuery($query);
+        if (!empty($term = $paramFetcher->get('term'))) {
+            $query->setSearchTerm(new SearchTerm($term));
+        }
+
+        $data = $this->repository->getCustomersForQuery($query);
         $view = new View($data, 200);
         $view->getContext()->setGroups(['Default', 'Collection', 'Customer']);
 
@@ -106,10 +113,10 @@ class CustomerController extends BaseApiController
      *      @SWG\Schema(ref="#/definitions/CustomerEntity"),
      * )
      *
-     * @param int $id
-     * @return Response
+     * @ApiSecurity(name="apiUser")
+     * @ApiSecurity(name="apiToken")
      */
-    public function getAction($id)
+    public function getAction(int $id): Response
     {
         $data = $this->repository->find($id);
 
@@ -141,13 +148,10 @@ class CustomerController extends BaseApiController
      *      @SWG\Schema(ref="#/definitions/CustomerEditForm")
      * )
      *
-     * @param Request $request
-     * @return Response
-     * @throws \App\Repository\RepositoryException
-     * @throws \Doctrine\ORM\ORMException
-     * @throws \Doctrine\ORM\OptimisticLockException
+     * @ApiSecurity(name="apiUser")
+     * @ApiSecurity(name="apiToken")
      */
-    public function postAction(Request $request)
+    public function postAction(Request $request): Response
     {
         if (!$this->isGranted('create_customer')) {
             throw new AccessDeniedHttpException('User cannot create customers');
@@ -155,16 +159,15 @@ class CustomerController extends BaseApiController
 
         $customer = new Customer();
 
-        $form = $this->createForm(CustomerEditForm::class, $customer, [
-            'csrf_protection' => false,
-        ]);
+        $event = new CustomerMetaDefinitionEvent($customer);
+        $this->dispatcher->dispatch($event);
+
+        $form = $this->createForm(CustomerApiEditForm::class, $customer);
 
         $form->submit($request->request->all());
 
         if ($form->isValid()) {
-            $entityManager = $this->getDoctrine()->getManager();
-            $entityManager->persist($customer);
-            $entityManager->flush();
+            $this->repository->saveCustomer($customer);
 
             $view = new View($customer, 200);
             $view->getContext()->setGroups(['Default', 'Entity', 'Customer']);
@@ -203,11 +206,10 @@ class CustomerController extends BaseApiController
      *      required=true,
      * )
      *
-     * @param Request $request
-     * @param string $id
-     * @return Response
+     * @ApiSecurity(name="apiUser")
+     * @ApiSecurity(name="apiToken")
      */
-    public function patchAction(Request $request, string $id)
+    public function patchAction(Request $request, int $id): Response
     {
         $customer = $this->repository->find($id);
 
@@ -219,9 +221,10 @@ class CustomerController extends BaseApiController
             throw new AccessDeniedHttpException('User cannot update customer');
         }
 
-        $form = $this->createForm(CustomerEditForm::class, $customer, [
-            'csrf_protection' => false,
-        ]);
+        $event = new CustomerMetaDefinitionEvent($customer);
+        $this->dispatcher->dispatch($event);
+
+        $form = $this->createForm(CustomerApiEditForm::class, $customer);
 
         $form->setData($customer);
         $form->submit($request->request->all(), false);
@@ -233,11 +236,62 @@ class CustomerController extends BaseApiController
             return $this->viewHandler->handle($view);
         }
 
-        $entityManager = $this->getDoctrine()->getManager();
-        $entityManager->persist($customer);
-        $entityManager->flush();
+        $this->repository->saveCustomer($customer);
 
         $view = new View($customer, Response::HTTP_OK);
+        $view->getContext()->setGroups(['Default', 'Entity', 'Customer']);
+
+        return $this->viewHandler->handle($view);
+    }
+
+    /**
+     * Sets the value of a meta-field for an existing customer.
+     *
+     * @SWG\Response(
+     *      response=200,
+     *      description="Sets the value of an existing/configured meta-field. You cannot create unknown meta-fields, if the given name is not a configured meta-field, this will return an exception.",
+     *      @SWG\Schema(ref="#/definitions/CustomerEntity")
+     * )
+     * @SWG\Parameter(
+     *      name="id",
+     *      in="path",
+     *      type="integer",
+     *      description="Customer record ID to set the meta-field value for",
+     *      required=true,
+     * )
+     * @Rest\RequestParam(name="name", strict=true, nullable=false, description="The meta-field name")
+     * @Rest\RequestParam(name="value", strict=true, nullable=false, description="The meta-field value")
+     *
+     * @ApiSecurity(name="apiUser")
+     * @ApiSecurity(name="apiToken")
+     */
+    public function metaAction(int $id, ParamFetcherInterface $paramFetcher): Response
+    {
+        $customer = $this->repository->find($id);
+
+        if (null === $customer) {
+            throw new NotFoundException();
+        }
+
+        if (!$this->isGranted('edit', $customer)) {
+            throw new AccessDeniedHttpException('You are not allowed to update this customer');
+        }
+
+        $event = new CustomerMetaDefinitionEvent($customer);
+        $this->dispatcher->dispatch($event);
+
+        $name = $paramFetcher->get('name');
+        $value = $paramFetcher->get('value');
+
+        if (null === ($meta = $customer->getMetaField($name))) {
+            throw new \InvalidArgumentException('Unknown meta-field requested');
+        }
+
+        $meta->setValue($value);
+
+        $this->repository->saveCustomer($customer);
+
+        $view = new View($customer, 200);
         $view->getContext()->setGroups(['Default', 'Entity', 'Customer']);
 
         return $this->viewHandler->handle($view);

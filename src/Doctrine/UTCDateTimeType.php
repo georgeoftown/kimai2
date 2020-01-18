@@ -16,7 +16,7 @@ use Doctrine\DBAL\Types\DateTimeType;
 class UTCDateTimeType extends DateTimeType
 {
     /**
-     * @var \DateTimeZone
+     * @var \DateTimeZone|null
      */
     private static $utc;
 
@@ -71,5 +71,10 @@ class UTCDateTimeType extends DateTimeType
         }
 
         return $converted;
+    }
+
+    public function requiresSQLCommentHint(AbstractPlatform $platform)
+    {
+        return true;
     }
 }

@@ -9,17 +9,21 @@
 
 namespace App\Tests\Invoice\Renderer;
 
+use App\Invoice\InvoiceModel;
 use App\Invoice\Renderer\XlsxRenderer;
-use App\Model\InvoiceModel;
+use PHPUnit\Framework\TestCase;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 /**
  * @covers \App\Invoice\Renderer\XlsxRenderer
  * @covers \App\Invoice\Renderer\AbstractRenderer
  * @covers \App\Invoice\Renderer\AbstractSpreadsheetRenderer
+ * @group integration
  */
-class XlsxRendererTest extends AbstractRendererTest
+class XlsxRendererTest extends TestCase
 {
+    use RendererTestTrait;
+
     public function testSupports()
     {
         $sut = $this->getAbstractRenderer(XlsxRenderer::class);
@@ -30,7 +34,7 @@ class XlsxRendererTest extends AbstractRendererTest
         $this->assertFalse($sut->supports($this->getInvoiceDocument('foo.html.twig')));
         $this->assertFalse($sut->supports($this->getInvoiceDocument('company.docx')));
         $this->assertFalse($sut->supports($this->getInvoiceDocument('export.csv')));
-        $this->assertTrue($sut->supports($this->getInvoiceDocument('spreadsheet.xlsx')));
+        $this->assertTrue($sut->supports($this->getInvoiceDocument('spreadsheet.xlsx', true)));
         $this->assertFalse($sut->supports($this->getInvoiceDocument('open-spreadsheet.ods')));
     }
 
@@ -48,7 +52,7 @@ class XlsxRendererTest extends AbstractRendererTest
         /** @var XlsxRenderer $sut */
         $sut = $this->getAbstractRenderer(XlsxRenderer::class);
         $model = $this->getInvoiceModel();
-        $document = $this->getInvoiceDocument('spreadsheet.xlsx');
+        $document = $this->getInvoiceDocument('spreadsheet.xlsx', true);
         /** @var BinaryFileResponse $response */
         $response = $sut->render($document, $model);
 
@@ -62,7 +66,7 @@ class XlsxRendererTest extends AbstractRendererTest
         /*
         $content = file_get_contents($file->getRealPath());
         $this->assertNotContains('${', $content);
-        $this->assertContains(',"1,947.99" ', $content);
+        $this->assertStringContainsString(',"1,947.99" ', $content);
         $this->assertEquals(6, substr_count($content, PHP_EOL));
         $this->assertEquals(5, substr_count($content, 'activity description'));
         $this->assertEquals(1, substr_count($content, ',"kevin",'));

@@ -12,6 +12,7 @@ namespace App\Form\Type;
 use App\Entity\Project;
 use App\Repository\ProjectRepository;
 use App\Repository\Query\ActivityQuery;
+use App\Repository\Query\ProjectFormTypeQuery;
 use Symfony\Bridge\Doctrine\Form\Type\EntityType;
 use Symfony\Component\Form\AbstractType;
 use Symfony\Component\OptionsResolver\Options;
@@ -24,8 +25,8 @@ class ProjectType extends AbstractType
 {
     /**
      * @param Project $choiceValue
-     * @param $key
-     * @param $value
+     * @param string $key
+     * @param mixed $value
      * @return array
      */
     public function choiceAttr($choiceValue, $key, $value)
@@ -61,20 +62,33 @@ class ProjectType extends AbstractType
             'group_by' => function (Project $project, $key, $index) {
                 return $project->getCustomer()->getName();
             },
-            'query_builder' => function (ProjectRepository $repo) {
-                return $repo->builderForEntityType(null);
-            },
+            'query_builder_for_user' => true,
             'activity_enabled' => false,
             'activity_visibility' => ActivityQuery::SHOW_VISIBLE,
+            'ignore_date' => false,
         ]);
+
+        $resolver->setDefault('query_builder', function (Options $options) {
+            return function (ProjectRepository $repo) use ($options) {
+                $query = new ProjectFormTypeQuery();
+                if (true === $options['query_builder_for_user']) {
+                    $query->setUser($options['user']);
+                }
+                if (true === $options['ignore_date']) {
+                    $query->setIgnoreDate(true);
+                }
+
+                return $repo->getQueryBuilderForFormType($query);
+            };
+        });
 
         $resolver->setDefault('api_data', function (Options $options) {
             if (true === $options['activity_enabled']) {
                 return [
                     'select' => 'activity',
                     'route' => 'get_activities',
-                    'route_params' => ['project' => '-s-', 'orderBy' => 'name', 'visible' => $options['activity_visibility']],
-                    'empty_route_params' => ['globals' => 'true', 'orderBy' => 'name', 'visible' => $options['activity_visibility']],
+                    'route_params' => ['project' => '%project%', 'visible' => $options['activity_visibility']],
+                    'empty_route_params' => ['globals' => 'true', 'visible' => $options['activity_visibility']],
                 ];
             }
 

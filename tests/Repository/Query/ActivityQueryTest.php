@@ -12,7 +12,7 @@ namespace App\Tests\Repository\Query;
 use App\Entity\Customer;
 use App\Entity\Project;
 use App\Repository\Query\ActivityQuery;
-use App\Repository\Query\VisibilityQuery;
+use App\Repository\Query\VisibilityInterface;
 
 /**
  * @covers \App\Repository\Query\ActivityQuery
@@ -23,8 +23,8 @@ class ActivityQueryTest extends BaseQueryTest
     {
         $sut = new ActivityQuery();
 
-        $this->assertBaseQuery($sut);
-        $this->assertInstanceOf(VisibilityQuery::class, $sut);
+        $this->assertBaseQuery($sut, 'name');
+        $this->assertInstanceOf(VisibilityInterface::class, $sut);
 
         $this->assertNull($sut->getCustomer());
         $this->assertNull($sut->getProject());
@@ -47,5 +47,7 @@ class ActivityQueryTest extends BaseQueryTest
 
         $sut->setCustomer(99);
         $this->assertEquals(99, $sut->getCustomer());
+
+        $this->assertResetByFormError(new ActivityQuery(), 'name');
     }
 }

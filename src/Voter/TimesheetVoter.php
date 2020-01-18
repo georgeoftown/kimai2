@@ -85,12 +85,24 @@ class TimesheetVoter extends AbstractVoter
                 $permission .= $attribute;
                 break;
 
+            case self::EDIT:
+                if (!$this->canEdit($user, $subject)) {
+                    return false;
+                }
+                $permission .= $attribute;
+                break;
+
+            case self::DELETE:
+                if (!$this->canDelete($user, $subject)) {
+                    return false;
+                }
+                $permission .= $attribute;
+                break;
+
             case self::VIEW_RATE:
             case self::EDIT_RATE:
             case self::STOP:
-            case self::EDIT:
             case self::VIEW:
-            case self::DELETE:
             case self::EXPORT:
             case self::EDIT_EXPORT:
                 $permission .= $attribute;
@@ -114,11 +126,7 @@ class TimesheetVoter extends AbstractVoter
         return $this->hasRolePermission($user, $permission);
     }
 
-    /**
-     * @param Timesheet $timesheet
-     * @return bool
-     */
-    protected function canStart(Timesheet $timesheet)
+    protected function canStart(Timesheet $timesheet): bool
     {
         // possible improvements for the future:
         // we could check the amount of active entries (maybe slow)
@@ -132,11 +140,29 @@ class TimesheetVoter extends AbstractVoter
             return false;
         }
 
-        if (!$timesheet->getActivity()->getVisible() || !$timesheet->getProject()->getVisible()) {
+        if (!$timesheet->getActivity()->isVisible() || !$timesheet->getProject()->isVisible()) {
             return false;
         }
 
-        if (!$timesheet->getProject()->getCustomer()->getVisible()) {
+        if (!$timesheet->getProject()->getCustomer()->isVisible()) {
+            return false;
+        }
+
+        return true;
+    }
+
+    protected function canEdit(User $user, Timesheet $timesheet): bool
+    {
+        if ($timesheet->isExported() && !$this->hasRolePermission($user, 'edit_exported_timesheet')) {
+            return false;
+        }
+
+        return true;
+    }
+
+    protected function canDelete(User $user, Timesheet $timesheet): bool
+    {
+        if ($timesheet->isExported() && !$this->hasRolePermission($user, 'edit_exported_timesheet')) {
             return false;
         }
 

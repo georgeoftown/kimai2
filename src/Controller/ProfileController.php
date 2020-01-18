@@ -9,20 +9,24 @@
 
 namespace App\Controller;
 
-use App\Entity\Timesheet;
 use App\Entity\User;
+use App\Entity\UserPreference;
 use App\Event\PrepareUserEvent;
 use App\Form\UserApiTokenType;
 use App\Form\UserEditType;
 use App\Form\UserPasswordType;
 use App\Form\UserPreferencesForm;
 use App\Form\UserRolesType;
+use App\Form\UserTeamsType;
+use App\Repository\TeamRepository;
 use App\Repository\TimesheetRepository;
 use App\Voter\UserVoter;
+use Doctrine\Common\Collections\ArrayCollection;
 use Sensio\Bundle\FrameworkExtraBundle\Configuration\Security;
 use Symfony\Component\EventDispatcher\EventDispatcherInterface;
-use Symfony\Component\Form\Form;
+use Symfony\Component\Form\FormInterface;
 use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Annotation\Route;
 use Symfony\Component\Security\Core\Encoder\UserPasswordEncoderInterface;
 
@@ -37,21 +41,21 @@ class ProfileController extends AbstractController
     /**
      * @var EventDispatcherInterface
      */
-    protected $dispatcher;
-
+    private $dispatcher;
     /**
      * @var UserPasswordEncoderInterface
      */
-    protected $encoder;
-
+    private $encoder;
     /**
-     * @param UserPasswordEncoderInterface $encoder
-     * @param EventDispatcherInterface $dispatcher
+     * @var TeamRepository
      */
-    public function __construct(UserPasswordEncoderInterface $encoder, EventDispatcherInterface $dispatcher)
+    private $teams;
+
+    public function __construct(UserPasswordEncoderInterface $encoder, EventDispatcherInterface $dispatcher, TeamRepository $teams)
     {
         $this->encoder = $encoder;
         $this->dispatcher = $dispatcher;
+        $this->teams = $teams;
     }
 
     /**
@@ -67,9 +71,19 @@ class ProfileController extends AbstractController
      * @Route(path="/{username}", name="user_profile", methods={"GET"})
      * @Security("is_granted('view', profile)")
      */
-    public function indexAction(User $profile)
+    public function indexAction(User $profile, TimesheetRepository $repository)
     {
-        return $this->renderProfileView($profile, 'charts', 'user/stats.html.twig', []);
+        $userStats = $repository->getUserStatistics($profile);
+        $monthlyStats = $repository->getMonthlyStats($profile);
+
+        $viewVars = [
+            'tab' => 'charts',
+            'user' => $profile,
+            'stats' => $userStats,
+            'years' => $monthlyStats,
+        ];
+
+        return $this->render('user/stats.html.twig', $viewVars);
     }
 
     /**
@@ -167,6 +181,28 @@ class ProfileController extends AbstractController
     }
 
     /**
+     * @Route(path="/{username}/teams", name="user_profile_teams", methods={"GET", "POST"})
+     * @Security("is_granted('teams', profile)")
+     */
+    public function teamsAction(User $profile, Request $request)
+    {
+        $form = $this->createTeamsForm($profile);
+        $form->handleRequest($request);
+
+        if ($form->isSubmitted() && $form->isValid()) {
+            $entityManager = $this->getDoctrine()->getManager();
+            $entityManager->persist($profile);
+            $entityManager->flush();
+
+            $this->flashSuccess('action.update.success');
+
+            return $this->redirectToRoute('user_profile_teams', ['username' => $profile->getUsername()]);
+        }
+
+        return $this->getProfileView($profile, 'teams', null, null, null, null, $form);
+    }
+
+    /**
      * @Route(path="/{username}/prefs", name="user_profile_preferences", methods={"GET", "POST"})
      * @Security("is_granted('preferences', profile)")
      */
@@ -174,7 +210,14 @@ class ProfileController extends AbstractController
     {
         // we need to prepare the user preferences, which is done via an EventSubscriber
         $event = new PrepareUserEvent($profile);
-        $this->dispatcher->dispatch(PrepareUserEvent::PREPARE, $event);
+        $this->dispatcher->dispatch($event);
+
+        /** @var \ArrayIterator $iterator */
+        $iterator = $profile->getPreferences()->getIterator();
+        $iterator->uasort(function (UserPreference $a, UserPreference $b) {
+            return ($a->getOrder() < $b->getOrder()) ? -1 : 1;
+        });
+        $profile->setPreferences(new ArrayCollection(iterator_to_array($iterator)));
 
         $original = [];
         foreach ($profile->getPreferences() as $preference) {
@@ -227,24 +270,15 @@ class ProfileController extends AbstractController
         ]);
     }
 
-    /**
-     * @param User $user
-     * @param string $tab
-     * @param Form|null $editForm
-     * @param Form|null $pwdForm
-     * @param Form|null $rolesForm
-     * @param Form|null $apiTokenForm
-     * @return \Symfony\Component\HttpFoundation\Response
-     * @throws \Doctrine\ORM\NonUniqueResultException
-     */
     protected function getProfileView(
         User $user,
         string $tab,
-        Form $editForm = null,
-        Form $pwdForm = null,
-        Form $rolesForm = null,
-        Form $apiTokenForm = null
-    ) {
+        FormInterface $editForm = null,
+        FormInterface $pwdForm = null,
+        FormInterface $rolesForm = null,
+        FormInterface $apiTokenForm = null,
+        FormInterface $teamsForm = null
+    ): Response {
         $forms = [];
 
         if ($this->isGranted(UserVoter::EDIT, $user)) {
@@ -259,6 +293,10 @@ class ProfileController extends AbstractController
             $apiTokenForm = $apiTokenForm ?: $this->createApiTokenForm($user);
             $forms['api-token'] = $apiTokenForm->createView();
         }
+        if ($this->isGranted(UserVoter::TEAMS, $user) && $this->teams->count([]) > 0) {
+            $teamsForm = $teamsForm ?: $this->createTeamsForm($user);
+            $forms['teams'] = $teamsForm->createView();
+        }
         if ($this->isGranted(UserVoter::ROLES, $user)) {
             $rolesForm = $rolesForm ?: $this->createRolesForm($user);
             $forms['roles'] = $rolesForm->createView();
@@ -271,33 +309,8 @@ class ProfileController extends AbstractController
         ]);
     }
 
-    protected function renderProfileView(User $user, string $tab, string $template, array $vars)
+    private function createPreferencesForm(User $user): FormInterface
     {
-        /* @var $timesheetRepo TimesheetRepository */
-        $timesheetRepo = $this->getDoctrine()->getRepository(Timesheet::class);
-        $userStats = $timesheetRepo->getUserStatistics($user);
-        $monthlyStats = $timesheetRepo->getMonthlyStats($user);
-
-        $viewVars = [
-            'tab' => $tab,
-            'user' => $user,
-            'stats' => $userStats,
-            'years' => $monthlyStats,
-        ];
-
-        return $this->render($template, array_merge($viewVars, $vars));
-    }
-
-    /**
-     * @param User $user
-     * @return \Symfony\Component\Form\FormInterface
-     */
-    private function createPreferencesForm(User $user)
-    {
-        // we need to prepare the user preferences, which is done via an EventSubscriber
-        $event = new PrepareUserEvent($user);
-        $this->dispatcher->dispatch(PrepareUserEvent::PREPARE, $event);
-
         return $this->createForm(
             UserPreferencesForm::class,
             $user,
@@ -308,11 +321,7 @@ class ProfileController extends AbstractController
         );
     }
 
-    /**
-     * @param User $user
-     * @return \Symfony\Component\Form\FormInterface
-     */
-    private function createEditForm(User $user)
+    private function createEditForm(User $user): FormInterface
     {
         return $this->createForm(
             UserEditType::class,
@@ -325,11 +334,7 @@ class ProfileController extends AbstractController
         );
     }
 
-    /**
-     * @param User $user
-     * @return \Symfony\Component\Form\FormInterface
-     */
-    private function createRolesForm(User $user)
+    private function createRolesForm(User $user): FormInterface
     {
         return $this->createForm(
             UserRolesType::class,
@@ -341,28 +346,32 @@ class ProfileController extends AbstractController
         );
     }
 
-    /**
-     * @param User $user
-     * @return \Symfony\Component\Form\FormInterface
-     */
-    private function createPasswordForm(User $user)
+    private function createTeamsForm(User $user): FormInterface
+    {
+        return $this->createForm(
+            UserTeamsType::class,
+            $user,
+            [
+                'action' => $this->generateUrl('user_profile_teams', ['username' => $user->getUsername()]),
+                'method' => 'POST',
+            ]
+        );
+    }
+
+    private function createPasswordForm(User $user): FormInterface
     {
         return $this->createForm(
             UserPasswordType::class,
             $user,
             [
-                'validation_groups' => ['passwordUpdate'],
+                'validation_groups' => ['PasswordUpdate'],
                 'action' => $this->generateUrl('user_profile_password', ['username' => $user->getUsername()]),
                 'method' => 'POST'
             ]
         );
     }
 
-    /**
-     * @param User $user
-     * @return \Symfony\Component\Form\FormInterface
-     */
-    private function createApiTokenForm(User $user)
+    private function createApiTokenForm(User $user): FormInterface
     {
         return $this->createForm(
             UserApiTokenType::class,

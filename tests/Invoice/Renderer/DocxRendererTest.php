@@ -10,14 +10,18 @@
 namespace App\Tests\Invoice\Renderer;
 
 use App\Invoice\Renderer\DocxRenderer;
+use PHPUnit\Framework\TestCase;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 /**
  * @covers \App\Invoice\Renderer\DocxRenderer
  * @covers \App\Invoice\Renderer\AbstractRenderer
+ * @group integration
  */
-class DocxRendererTest extends AbstractRendererTest
+class DocxRendererTest extends TestCase
 {
+    use RendererTestTrait;
+
     public function testSupports()
     {
         $sut = $this->getAbstractRenderer(DocxRenderer::class);
@@ -51,7 +55,7 @@ class DocxRendererTest extends AbstractRendererTest
         /*
         $content = file_get_contents($file->getRealPath());
         $this->assertNotContains('${', $content);
-        $this->assertContains(',"1,947.99" ', $content);
+        $this->assertStringContainsString(',"1,947.99" ', $content);
         $this->assertEquals(6, substr_count($content, PHP_EOL));
         $this->assertEquals(5, substr_count($content, 'activity description'));
         $this->assertEquals(1, substr_count($content, ',"kevin",'));

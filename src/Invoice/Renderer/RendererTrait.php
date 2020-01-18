@@ -9,208 +9,49 @@
 
 namespace App\Invoice\Renderer;
 
-use App\Entity\InvoiceDocument;
-use App\Entity\Timesheet;
-use App\Entity\UserPreference;
-use App\Model\InvoiceModel;
-use Symfony\Component\HttpFoundation\BinaryFileResponse;
-use Symfony\Component\HttpFoundation\ResponseHeaderBag;
+use App\Invoice\InvoiceItem;
+use App\Invoice\InvoiceModel;
 
 trait RendererTrait
 {
     /**
-     * @return string[]
+     * @var InvoiceModel
      */
-    abstract protected function getFileExtensions();
+    private $model;
 
     /**
-     * @return string
-     */
-    abstract protected function getContentType();
-
-    /**
-     * @param InvoiceDocument $document
-     * @return bool
-     */
-    public function supports(InvoiceDocument $document): bool
-    {
-        foreach ($this->getFileExtensions() as $extension) {
-            if (stripos($document->getFilename(), $extension) !== false) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /**
-     * @param \DateTime $date
-     * @return mixed
-     */
-    abstract protected function getFormattedDateTime(\DateTime $date);
-
-    /**
-     * @param \DateTime $date
-     * @return mixed
-     */
-    abstract protected function getFormattedTime(\DateTime $date);
-
-    /**
-     * @param $amount
-     * @return mixed
-     */
-    abstract protected function getFormattedMoney($amount, $currency);
-
-    /**
-     * @param \DateTime $date
-     * @return mixed
-     */
-    abstract protected function getFormattedMonthName(\DateTime $date);
-
-    /**
-     * @param $seconds
-     * @return mixed
-     */
-    abstract protected function getFormattedDuration($seconds);
-
-    /**
+     * @deprecated since 1.6.2 - will be removed with 2.0
      * @param InvoiceModel $model
      * @return array
      */
     protected function modelToReplacer(InvoiceModel $model)
     {
-        $customer = $model->getCustomer();
-        $project = $model->getQuery()->getProject();
-        $currency = $model->getCalculator()->getCurrency();
+        @trigger_error('modelToReplacer() is deprecated and will be removed with 2.0', E_USER_DEPRECATED);
 
-        $values = [
-            'invoice.due_date' => $this->getFormattedDateTime($model->getDueDate()),
-            'invoice.date' => $this->getFormattedDateTime($model->getInvoiceDate()),
-            'invoice.number' => $model->getNumberGenerator()->getInvoiceNumber(),
-            'invoice.currency' => $model->getCalculator()->getCurrency(),
-            'invoice.vat' => $model->getCalculator()->getVat(),
-            'invoice.tax' => $this->getFormattedMoney($model->getCalculator()->getTax(), $currency),
-            'invoice.total_time' => $this->getFormattedDuration($model->getCalculator()->getTimeWorked()),
-            'invoice.total' => $this->getFormattedMoney($model->getCalculator()->getTotal(), $currency),
-            'invoice.subtotal' => $this->getFormattedMoney($model->getCalculator()->getSubtotal(), $currency),
+        $this->model = $model;
 
-            'template.name' => $model->getTemplate()->getName(),
-            'template.company' => $model->getTemplate()->getCompany(),
-            'template.address' => $model->getTemplate()->getAddress(),
-            'template.title' => $model->getTemplate()->getTitle(),
-            'template.payment_terms' => $model->getTemplate()->getPaymentTerms(),
-            'template.due_days' => $model->getTemplate()->getDueDays(),
-
-            'query.begin' => $this->getFormattedDateTime($model->getQuery()->getBegin()),
-            'query.end' => $this->getFormattedDateTime($model->getQuery()->getEnd()),
-            'query.month' => $this->getFormattedMonthName($model->getQuery()->getBegin()),
-            'query.year' => $model->getQuery()->getBegin()->format('Y'),
-        ];
-
-        if (null !== $project) {
-            $values = array_merge($values, [
-                'project.id' => $project->getId(),
-                'project.name' => $project->getName(),
-                'project.comment' => $project->getComment(),
-                'project.order_number' => $project->getOrderNumber(),
-            ]);
-        }
-
-        if (null !== $customer) {
-            $values = array_merge($values, [
-                'customer.id' => $customer->getId(),
-                'customer.address' => $customer->getAddress(),
-                'customer.name' => $customer->getName(),
-                'customer.contact' => $customer->getContact(),
-                'customer.company' => $customer->getCompany(),
-                'customer.number' => $customer->getNumber(),
-                'customer.country' => $customer->getCountry(),
-                'customer.homepage' => $customer->getHomepage(),
-                'customer.comment' => $customer->getComment(),
-            ]);
-        }
-
-        return $values;
+        return $model->toArray();
     }
 
     /**
-     * @param Timesheet $timesheet
+     * @deprecated since 1.3 - will be removed with 2.0
+     */
+    protected function timesheetToArray(InvoiceItem $invoiceItem): array
+    {
+        @trigger_error('timesheetToArray() is deprecated and will be removed with 2.0', E_USER_DEPRECATED);
+
+        return $this->model->itemToArray($invoiceItem);
+    }
+
+    /**
+     * @deprecated since 1.6.2 - will be removed with 2.0
+     * @param InvoiceItem $invoiceItem
      * @return array
      */
-    protected function timesheetToArray(Timesheet $timesheet)
+    protected function invoiceItemToArray(InvoiceItem $invoiceItem): array
     {
-        $rate = $timesheet->getRate();
-        $hourlyRate = $timesheet->getHourlyRate();
-        $amount = $this->getFormattedDuration($timesheet->getDuration());
-        $description = $timesheet->getDescription();
+        @trigger_error('invoiceItemToArray() is deprecated and will be removed with 2.0', E_USER_DEPRECATED);
 
-        if (null !== $timesheet->getFixedRate()) {
-            $rate = $timesheet->getFixedRate();
-            $hourlyRate = $timesheet->getFixedRate();
-            $amount = 1;
-        }
-
-        if (empty($description)) {
-            $description = $timesheet->getActivity()->getName();
-        }
-
-        $user = $timesheet->getUser();
-
-        if (empty($hourlyRate)) {
-            $hourlyRate = $user->getPreferenceValue(UserPreference::HOURLY_RATE);
-        }
-
-        $activity = $timesheet->getActivity();
-        $project = $timesheet->getProject();
-        $customer = $project->getCustomer();
-        $currency = $customer->getCurrency();
-
-        $begin = $timesheet->getBegin();
-        $end = $timesheet->getEnd();
-
-        return [
-            'entry.row' => '',
-            'entry.description' => $description,
-            'entry.amount' => $amount,
-            'entry.rate' => $this->getFormattedMoney($hourlyRate, $currency),
-            'entry.total' => $this->getFormattedMoney($rate, $currency),
-            'entry.currency' => $currency,
-            'entry.duration' => $timesheet->getDuration(),
-            'entry.duration_minutes' => number_format($timesheet->getDuration() / 60),
-            'entry.begin' => $this->getFormattedDateTime($begin),
-            'entry.begin_time' => $this->getFormattedTime($begin),
-            'entry.begin_timestamp' => $begin->getTimestamp(),
-            'entry.end' => $this->getFormattedDateTime($end),
-            'entry.end_time' => $this->getFormattedTime($end),
-            'entry.end_timestamp' => $end->getTimestamp(),
-            'entry.date' => $this->getFormattedDateTime($begin),
-            'entry.user_id' => $user->getId(),
-            'entry.user_name' => $user->getUsername(),
-            'entry.user_title' => $user->getTitle(),
-            'entry.user_alias' => $user->getAlias(),
-            'entry.activity' => $activity->getName(),
-            'entry.activity_id' => $activity->getId(),
-            'entry.project' => $project->getName(),
-            'entry.project_id' => $project->getId(),
-            'entry.customer' => $customer->getName(),
-            'entry.customer_id' => $customer->getId(),
-        ];
-    }
-
-    /**
-     * @param mixed $file
-     * @param string $filename
-     * @return BinaryFileResponse
-     */
-    protected function getFileResponse($file, $filename)
-    {
-        $response = new BinaryFileResponse($file);
-        $disposition = $response->headers->makeDisposition(ResponseHeaderBag::DISPOSITION_ATTACHMENT, $filename);
-
-        $response->headers->set('Content-Type', $this->getContentType());
-        $response->headers->set('Content-Disposition', $disposition);
-        $response->deleteFileAfterSend(true);
-
-        return $response;
+        return $this->model->itemToArray($invoiceItem);
     }
 }

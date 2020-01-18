@@ -11,6 +11,8 @@ namespace App\Form\Toolbar;
 
 use App\Form\Type\InvoiceTemplateType;
 use App\Repository\Query\InvoiceQuery;
+use Symfony\Component\Form\Extension\Core\Type\CheckboxType;
+use Symfony\Component\Form\Extension\Core\Type\SubmitType;
 use Symfony\Component\Form\FormBuilderInterface;
 use Symfony\Component\OptionsResolver\OptionsResolver;
 
@@ -24,19 +26,34 @@ class InvoiceToolbarForm extends AbstractToolbarForm
      */
     public function buildForm(FormBuilderInterface $builder, array $options)
     {
+        $this->addSearchTermInputField($builder);
         $this->addTemplateChoice($builder);
-        $this->addUserChoice($builder);
+        if ($options['include_user']) {
+            $this->addUsersChoice($builder);
+        }
         $this->addDateRangeChoice($builder);
-        $this->addCustomerChoice($builder);
-        $this->addProjectChoice($builder);
+        $this->addCustomerChoice($builder, ['required' => true, 'start_date_param' => null, 'end_date_param' => null, 'ignore_date' => true, 'placeholder' => '']);
+        $this->addProjectChoice($builder, ['ignore_date' => true]);
         $this->addActivityChoice($builder);
         $this->addTagInputField($builder);
+        $this->addExportStateChoice($builder);
+        $builder->add('markAsExported', CheckboxType::class, [
+            'label' => 'label.mark_as_exported',
+            'required' => false,
+        ]);
+        $builder->add('create', SubmitType::class, [
+            'label' => 'button.print',
+            'attr' => ['formtarget' => '_blank'],
+        ]);
+        $builder->add('preview', SubmitType::class, [
+            'label' => 'button.preview',
+        ]);
     }
 
     protected function addTemplateChoice(FormBuilderInterface $builder)
     {
         $builder->add('template', InvoiceTemplateType::class, [
-            'required' => false,
+            'required' => true,
             'placeholder' => null,
         ]);
     }
@@ -49,6 +66,7 @@ class InvoiceToolbarForm extends AbstractToolbarForm
         $resolver->setDefaults([
             'data_class' => InvoiceQuery::class,
             'csrf_protection' => false,
+            'include_user' => true,
         ]);
     }
 }

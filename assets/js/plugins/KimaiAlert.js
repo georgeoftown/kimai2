@@ -27,7 +27,7 @@ export default class KimaiAlert extends KimaiPlugin {
             message = translation.get(message);
         }
         Swal.fire({
-            type: 'error',
+            icon: 'error',
             title: title.replace('%reason%', ''),
             text: message,
         });
@@ -41,12 +41,12 @@ export default class KimaiAlert extends KimaiPlugin {
         }
 
         Swal.fire({
-            //toast: true,
-            //timer: 3000,
-            timer: 1500,
+            timer: 2000,
+            timerProgressBar: true,
+            toast: true,
             position: 'top-end',
             showConfirmButton: false,
-            type: 'success',
+            icon: 'success',
             title: message,
         });
     }
@@ -66,14 +66,12 @@ export default class KimaiAlert extends KimaiPlugin {
 
         Swal.fire({
             title: message,
-            type: 'question',
+            icon: 'question',
             showCancelButton: true,
             confirmButtonText: translation.get('confirm'),
             cancelButtonText: translation.get('cancel')
         }).then((result) => {
-            if (result.value) {
-                callback(result.value);
-            }
+            callback(result.value);
         });
     }
 

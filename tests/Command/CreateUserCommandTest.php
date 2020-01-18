@@ -16,7 +16,7 @@ use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 use Symfony\Component\Console\Tester\CommandTester;
 
 /**
- * @coversDefaultClass \App\Command\CreateUserCommand
+ * @covers \App\Command\CreateUserCommand
  * @group integration
  */
 class CreateUserCommandTest extends KernelTestCase
@@ -26,7 +26,7 @@ class CreateUserCommandTest extends KernelTestCase
      */
     protected $application;
 
-    protected function setUp()
+    protected function setUp(): void
     {
         $kernel = self::bootKernel();
         $this->application = new Application($kernel);
@@ -41,16 +41,26 @@ class CreateUserCommandTest extends KernelTestCase
         ));
     }
 
-    public function testCreateUser()
+    public function testCreateUserFailsForShortPassword()
     {
         $commandTester = $this->createUser('MyTestUser', 'user@example.com', 'ROLE_USER', 'foobar');
 
         $output = $commandTester->getDisplay();
-        $this->assertContains('[OK] Success! Created user: MyTestUser', $output);
+        $this->assertStringContainsString('[ERROR] plainPassword (foobar)', $output);
+        $this->assertStringContainsString('This value is too short. It should have 8 characters or more.', $output);
+    }
+
+    public function testCreateUser()
+    {
+        $commandTester = $this->createUser('MyTestUser', 'user@example.com', 'ROLE_USER', 'foobar12');
+
+        $output = $commandTester->getDisplay();
+        $this->assertStringContainsString('[OK] Success! Created user: MyTestUser', $output);
 
         $container = self::$kernel->getContainer();
         $user = $container->get('doctrine')->getRepository(User::class)->loadUserByUsername('MyTestUser');
-        $this->assertNotNull($user);
+        self::assertInstanceOf(User::class, $user);
+        self::assertNotNull($user);
     }
 
     protected function createUser($username, $email, $role, $password)
@@ -68,32 +78,32 @@ class CreateUserCommandTest extends KernelTestCase
         return $commandTester;
     }
 
-    public function testUserWithValidationProblem()
+    public function testUserWithEmptyFieldsTriggersValidationProblem()
     {
         $commandTester = $this->createUser('xx', '', 'ROLE_USER', '');
         $output = $commandTester->getDisplay();
-        $this->assertContains('[ERROR] email ()', $output);
-        $this->assertContains('Please enter an email', $output);
-        $this->assertContains('[ERROR] plainPassword ()', $output);
-        $this->assertContains('Please enter a password', $output);
+        $this->assertStringContainsString('[ERROR] email ()', $output);
+        $this->assertStringContainsString('Please enter an email', $output);
+        $this->assertStringContainsString('[ERROR] plainPassword ()', $output);
+        $this->assertStringContainsString('Please enter a password', $output);
     }
 
     public function testUserAlreadyExisting()
     {
-        $this->createUser('MyTestUser', 'user@example.com', 'ROLE_USER', 'foobar');
+        $this->createUser('MyTestUser', 'user@example.com', 'ROLE_USER', 'foobar12');
         $commandTester = $this->createUser('MyTestUser', 'user@example.com', 'ROLE_USER', 'foobar');
 
         $output = $commandTester->getDisplay();
-        $this->assertContains('[ERROR] username (mytestuser)', $output);
-        $this->assertContains('The username is already used', $output);
+        $this->assertStringContainsString('[ERROR] username (mytestuser)', $output);
+        $this->assertStringContainsString('The username is already used', $output);
     }
 
     public function testUserEmail()
     {
-        $commandTester = $this->createUser('MyTestUser', 'ROLE_USER', 'ROLE_USER', 'foobar');
+        $commandTester = $this->createUser('MyTestUser', 'ROLE_USER', 'ROLE_USER', 'foobar12');
 
         $output = $commandTester->getDisplay();
-        $this->assertContains('[ERROR] email (ROLE_USER)', $output);
-        $this->assertContains('The email is not valid', $output);
+        $this->assertStringContainsString('[ERROR] email (ROLE_USER)', $output);
+        $this->assertStringContainsString('The email is not valid', $output);
     }
 }

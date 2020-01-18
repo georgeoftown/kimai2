@@ -29,10 +29,6 @@ abstract class AbstractVoter extends Voter
      */
     protected $roleManager;
 
-    /**
-     * @param AclDecisionManager $decisionManager
-     * @param RolePermissionManager $roleManager
-     */
     public function __construct(AclDecisionManager $decisionManager, RolePermissionManager $roleManager)
     {
         $this->decisionManager = $decisionManager;
@@ -46,16 +42,6 @@ abstract class AbstractVoter extends Voter
     protected function isFullyAuthenticated(TokenInterface $token)
     {
         return $this->decisionManager->isFullyAuthenticated($token);
-    }
-
-    /**
-     * @param string $role
-     * @param TokenInterface $token
-     * @return bool
-     */
-    protected function hasRole($role, TokenInterface $token)
-    {
-        return $this->decisionManager->hasRole($token, [$role]);
     }
 
     /**

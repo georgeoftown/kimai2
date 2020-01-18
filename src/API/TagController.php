@@ -11,18 +11,25 @@ declare(strict_types=1);
 
 namespace App\API;
 
+use App\Entity\Tag;
+use App\Form\API\TagApiEditForm;
 use App\Repository\TagRepository;
 use FOS\RestBundle\Controller\Annotations as Rest;
 use FOS\RestBundle\Controller\Annotations\RouteResource;
 use FOS\RestBundle\Request\ParamFetcherInterface;
 use FOS\RestBundle\View\View;
 use FOS\RestBundle\View\ViewHandlerInterface;
+use Nelmio\ApiDocBundle\Annotation\Security as ApiSecurity;
 use Sensio\Bundle\FrameworkExtraBundle\Configuration\Security;
 use Swagger\Annotations as SWG;
+use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 
 /**
  * @RouteResource("Tag")
+ *
+ * @Security("is_granted('IS_AUTHENTICATED_REMEMBERED')")
  */
 class TagController extends BaseApiController
 {
@@ -47,6 +54,8 @@ class TagController extends BaseApiController
     }
 
     /**
+     * Fetch all existing tags
+     *
      * @SWG\Response(
      *      response=200,
      *      description="Returns the collection of all existing tags as string array",
@@ -56,26 +65,73 @@ class TagController extends BaseApiController
      *      )
      * )
      *
-     * @Rest\QueryParam(name="name", requirements="[a-zA-Z0-9 -\.]+", strict=true, nullable=true, description="Search term to filter tag list")
+     * @Rest\QueryParam(name="name", strict=true, nullable=true, description="Search term to filter tag list")
      *
-     * @return Response
+     * @ApiSecurity(name="apiUser")
+     * @ApiSecurity(name="apiToken")
      */
-    public function cgetAction(ParamFetcherInterface $paramFetcher)
+    public function cgetAction(ParamFetcherInterface $paramFetcher): Response
     {
         $filter = $paramFetcher->get('name');
 
         $data = $this->repository->findAllTagNames($filter);
-        if (null === $data) {
-            $data = [];
-        }
+
         $view = new View($data, 200);
-        $view->getContext()->setGroups(['Default', 'Collection']);
+        $view->getContext()->setGroups(['Default', 'Collection', 'Tag']);
 
         return $this->viewHandler->handle($view);
     }
 
     /**
-     * Delete an existing tag
+     * Creates a new tag
+     *
+     * @SWG\Post(
+     *      description="Creates a new tag and returns it afterwards",
+     *      @SWG\Response(
+     *          response=200,
+     *          description="Returns the new created tag",
+     *          @SWG\Schema(ref="#/definitions/TagEntity"),
+     *      )
+     * )
+     * @SWG\Parameter(
+     *      name="body",
+     *      in="body",
+     *      required=true,
+     *      @SWG\Schema(ref="#/definitions/TagEditForm")
+     * )
+     *
+     * @ApiSecurity(name="apiUser")
+     * @ApiSecurity(name="apiToken")
+     */
+    public function postAction(Request $request): Response
+    {
+        if (!$this->isGranted('manage_tag')) {
+            throw new AccessDeniedHttpException('User cannot create tags');
+        }
+
+        $tag = new Tag();
+
+        $form = $this->createForm(TagApiEditForm::class, $tag);
+
+        $form->submit($request->request->all());
+
+        if ($form->isValid()) {
+            $this->repository->saveTag($tag);
+
+            $view = new View($tag, 200);
+            $view->getContext()->setGroups(['Default', 'Entity', 'Tag']);
+
+            return $this->viewHandler->handle($view);
+        }
+
+        $view = new View($form);
+        $view->getContext()->setGroups(['Default', 'Entity', 'Tag']);
+
+        return $this->viewHandler->handle($view);
+    }
+
+    /**
+     * Delete a tag
      *
      * @SWG\Delete(
      *      @SWG\Response(
@@ -93,10 +149,10 @@ class TagController extends BaseApiController
      *
      * @Security("is_granted('delete_tag')")
      *
-     * @param int $id
-     * @return Response
+     * @ApiSecurity(name="apiUser")
+     * @ApiSecurity(name="apiToken")
      */
-    public function deleteAction($id)
+    public function deleteAction(int $id): Response
     {
         $tag = $this->repository->find($id);
 
@@ -104,9 +160,7 @@ class TagController extends BaseApiController
             throw new NotFoundException();
         }
 
-        $entityManager = $this->getDoctrine()->getManager();
-        $entityManager->remove($tag);
-        $entityManager->flush();
+        $this->repository->deleteTag($tag);
 
         $view = new View(null, Response::HTTP_NO_CONTENT);
 

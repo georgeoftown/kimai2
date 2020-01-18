@@ -42,11 +42,19 @@
 {% block page_subtitle %}{% endblock %}
 
 {% block logo_mini %}
-    <b>K</b>TT
+    {% if not kimai_context.branding.mini is empty %}
+        {{ kimai_context.branding.mini|raw }}
+    {% else %}
+        <b>K</b>TT
+    {% endif %}
 {% endblock %}
 
 {% block logo_large %}
-    <b>Kimai</b> - Time Tracking
+    {% if not kimai_context.branding.company is empty %}
+        {{ kimai_context.branding.company|raw }}
+    {% else %}
+        <b>Kimai</b> - Time Tracking
+    {% endif %}
 {% endblock %}
 
 {% block footer %}
@@ -56,11 +64,19 @@
 {% block navbar_start %}
     {% if app.user is not null and is_granted('IS_AUTHENTICATED_REMEMBERED') %}
         {% if is_granted('view_own_timesheet') %}
-            <li class="visible-xs-inline-block">
-                <a href="{{ path('timesheet') }}" class="ddt-large">
-                    <i class="{{ 'timesheet'|icon }} fa-2x"></i>
-                </a>
-            </li>
+            {% if app.user.preferenceValue('login.initial_view') == 'calendar' %}
+                <li class="visible-xs-inline-block">
+                    <a href="{{ path('calendar') }}" class="ddt-large">
+                        <i class="{{ 'calendar'|icon }} fa-2x"></i>
+                    </a>
+                </li>
+            {% else %}
+                <li class="visible-xs-inline-block">
+                    <a href="{{ path('timesheet') }}" class="ddt-large">
+                        <i class="{{ 'timesheet'|icon }} fa-2x"></i>
+                    </a>
+                </li>
+            {% endif %}
         {% endif %}
         {% if is_granted('view_invoice') %}
             <li class="visible-xs-inline-block">
@@ -69,7 +85,7 @@
                 </a>
             </li>
         {% endif %}
-        {% if is_granted('view_export') %}
+        {% if is_granted('create_export') %}
             <li class="visible-xs-inline-block">
                 <a href="{{ path('export') }}" class="ddt-large">
                     <i class="{{ 'export'|icon }} fa-2x"></i>
@@ -77,7 +93,7 @@
             </li>
         {% endif %}
         {% block navbar_extensions %}{% endblock %}
-        {{ render(controller('App\\Controller\\TimesheetController::activeEntriesAction')) }}
+        {{ render(controller('App\\Controller\\LayoutController::activeEntries')) }}
     {% endif %}
 {% endblock %}
 
@@ -101,26 +117,31 @@
     {% import "macros/widgets.html.twig" as widgets %}
     <li class="dropdown user-menu">
         <a href="#" class="dropdown-toggle ddt-large" data-toggle="dropdown">
-            <i class="{{ 'user'|icon }} fa-2x"></i>
+            {{ widgets.user_avatar(app.user, false) }}
         </a>
         <ul class="dropdown-menu">
             {% if app.user is not null %}
+                {% if is_granted('view', app.user) %}
                 <li>
                     <a href="{{ path('user_profile', {'username' : app.user.username}) }}">
                         <h4 class="control-sidebar-subheading">
-                            <i class="{{ 'profile-stats'|icon }}"></i>
-                            {{ widgets.username(app.user) }}
+                            <i class="{{ 'avatar'|icon }}"></i>
+                            {{ 'my.profile'|trans }}
                         </h4>
                     </a>
                 </li>
+                {% endif %}
+                {% if is_granted('edit', app.user) %}
                 <li>
                     <a href="{{ path('user_profile_edit', {'username' : app.user.username}) }}">
                         <h4 class="control-sidebar-subheading">
                             <i class="{{ 'profile'|icon }}"></i>
-                            {{ 'profile.title'|trans }}
+                            {{ 'action.edit'|trans }}
                         </h4>
                     </a>
                 </li>
+                {% endif %}
+                {% if is_granted('preferences', app.user) %}
                 <li>
                     <a href="{{ path('user_profile_preferences', {'username' : app.user.username})  }}">
                         <h4 class="control-sidebar-subheading">
@@ -129,6 +150,7 @@
                         </h4>
                     </a>
                 </li>
+                {% endif %}
                 <li>
                     <a href="{{ path('fos_user_security_logout') }}">
                         <h4 class="control-sidebar-subheading">
@@ -154,19 +176,20 @@
 {% endblock %}
 
 {% block breadcrumb %}
+    {% block page_search %}{% endblock %}
     {% block page_actions %}{% endblock %}
 {% endblock %}
 
 {% block stylesheets %}
     {# we do not call parent() as we use a custom built for the frontend assets and don't want the default <stylesheet> #}
-    <link rel="stylesheet" href="{{ asset('build/app.css') }}">
+    {{ encore_entry_link_tags('app') }}
     {% set event = trigger(constant('App\\Event\\ThemeEvent::STYLESHEET')) %}
     {{ event.content|raw }}
 {% endblock %}
 
 {% block head %}
     {{ parent() }}
-    <script src="{{ asset('build/app.js') }}"></script>
+    {{ encore_entry_script_tags('app') }}
     {% include 'partials/head.html.twig' %}
     {% set event = trigger(constant('App\\Event\\ThemeEvent::HTML_HEAD')) %}
     {{ event.content|raw }}
@@ -175,11 +198,14 @@
 {% block javascripts %}
     {# no call to parent(), as we use a custom built for the frontend assets and don't want the default <script> #}
     <script type="text/javascript">
-        document.addEventListener('DOMContentLoaded', function() {
-            window.kimai = new KimaiWebLoader(
+        window.addEventListener('load', function() {
+            var loader = new KimaiWebLoader(
                 {
+                    login: '{{ path('fos_user_security_login') }}',
                     locale: '{{ app.request.locale }}',
-                    twentyFourHours: {{ 'true'|hour24('false') }}
+                    twentyFourHours: {{ 'true'|hour24('false') }},
+                    autoReloadDatatable: {% if theme_config('auto_reload_datatable') %}true{% else %}false{% endif %},
+                    autoComplete: {{ theme_config('autocomplete_chars') }}
                 },
                 {
                     'confirm': '{{ 'confirm'|trans }}',
@@ -203,9 +229,11 @@
                     'action.delete.success': '{{ 'action.delete.success'|trans({}, 'flashmessages') }}',
                     'action.delete.error': '{{ 'action.delete.error'|trans({}, 'flashmessages') }}',
                     'confirm.delete': '{{ 'confirm.delete' |trans }}',
-                    'delete': '{{ 'action.delete' |trans }}'
+                    'delete': '{{ 'action.delete' |trans }}',
+                    'login.required': '{{ 'login_required'|trans }}'
                 }
             );
+            window.kimai = loader.getKimai();
         });
     </script>
     {% set event = trigger(constant('App\\Event\\ThemeEvent::JAVASCRIPT')) %}

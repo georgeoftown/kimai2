@@ -32,20 +32,13 @@ class Version20190510205245 extends AbstractMigration
 
         $tags = $schema->createTable('kimai2_tags');
         $tags->addColumn('id', 'integer', ['length' => 11, 'autoincrement' => true, 'notnull' => true]);
-        $tags->addColumn('name', 'string', ['length' => 255, 'notnull' => true]);
+        $tags->addColumn('name', 'string', ['length' => 100, 'notnull' => true]);
         $tags->addUniqueIndex(['name'], 'UNIQ_27CAF54C5E237E06');
         $tags->setPrimaryKey(['id']);
     }
 
     public function down(Schema $schema): void
     {
-        $tags = $schema->getTable('kimai2_tags');
-        $tags->dropIndex('UNIQ_27CAF54C5E237E06');
-
-        $timesheetTags = $schema->getTable('kimai2_timesheet_tags');
-        $timesheetTags->dropIndex('IDX_E3284EFEABDD46BE');
-        $timesheetTags->dropIndex('IDX_E3284EFEBAD26311');
-
         $schema->dropTable('kimai2_timesheet_tags');
         $schema->dropTable('kimai2_tags');
     }

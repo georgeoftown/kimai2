@@ -11,9 +11,6 @@ namespace App\Configuration;
 
 class TimesheetConfiguration implements SystemBundleConfiguration
 {
-    public const MODE_DURATION_ONLY = 'duration_only';
-    public const MODE_DEFAULT = 'default';
-
     use StringAccessibleConfigTrait;
 
     public function getPrefix(): string
@@ -26,9 +23,14 @@ class TimesheetConfiguration implements SystemBundleConfiguration
         return (bool) $this->find('rules.allow_future_times');
     }
 
-    public function isDurationOnly(): bool
+    public function getTrackingMode(): string
     {
-        return $this->find('mode') === self::MODE_DURATION_ONLY;
+        return (string) $this->find('mode');
+    }
+
+    public function getDefaultBeginTime(): string
+    {
+        return (string) $this->find('default_begin');
     }
 
     public function isMarkdownEnabled(): bool
@@ -44,5 +46,30 @@ class TimesheetConfiguration implements SystemBundleConfiguration
     public function getActiveEntriesSoftLimit(): int
     {
         return (int) $this->find('active_entries.soft_limit');
+    }
+
+    public function getDefaultRoundingDays(): string
+    {
+        return (string) $this->find('rounding.default.days');
+    }
+
+    public function getDefaultRoundingMode(): string
+    {
+        return (string) $this->find('rounding.default.mode');
+    }
+
+    public function getDefaultRoundingBegin(): int
+    {
+        return (int) $this->find('rounding.default.begin');
+    }
+
+    public function getDefaultRoundingEnd(): int
+    {
+        return (int) $this->find('rounding.default.end');
+    }
+
+    public function getDefaultRoundingDuration(): int
+    {
+        return (int) $this->find('rounding.default.duration');
     }
 }
